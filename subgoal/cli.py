@@ -32,7 +32,7 @@ def parse_args(argv=None):
     p.add_argument("--model", metavar="NAME", help="default: the tool's own default")
     p.add_argument("--provider", choices=PROVIDERS, default="claude-code", help="default claude-code")
     p.add_argument("--dry-run", action="store_true",
-                   help="print the provider command and the first prompt; no call, no files")
+                   help="print the provider command and the first prompt; no call, no run folder")
     args = p.parse_args(argv)
     if min(args.max_iterations, args.max_minutes, args.max_tokens or 1) <= 0:
         p.error("limits must be above 0: every run is bounded, and there is no 'unlimited'")
