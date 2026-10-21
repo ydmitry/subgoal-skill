@@ -81,12 +81,12 @@ cd subgoal-skill
 python3 -m unittest discover -s tests
 ```
 
-Then do a dry run on a fresh copy of the example. It prints the exact `claude` command
-and the first prompt. It runs your check once to show the starting state, but it calls
-no agent and creates no run folder.
+Then do a dry run on a copy of the example (copying again resets the stub). It prints
+the exact `claude` command and the first prompt. It runs your check once to show the
+starting state, but it calls no agent and creates no run folder.
 
 ```bash
-cp -r examples/fizzbuzz /tmp/fizz
+mkdir -p /tmp/fizz && cp examples/fizzbuzz/* /tmp/fizz/
 python3 -m subgoal --dir /tmp/fizz --goal-file /tmp/fizz/GOAL.md \
   --check "python3 -m unittest -q test_fizzbuzz" --protect test_fizzbuzz.py --dry-run
 ```
