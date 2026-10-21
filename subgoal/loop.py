@@ -102,7 +102,7 @@ def run_check(check, workdir, timeout_s, step=0):
     """Run the user's check command in workdir. Exit code 0 means the goal holds."""
     start = time.monotonic()
     code, out, err, timed_out = run_process(check, workdir, timeout_s, shell=True)
-    seconds = time.monotonic() - start
+    seconds = round(time.monotonic() - start, 2)
     return CheckResult(None if timed_out else code, (out + err)[-TAIL_CAP:], seconds, step)
 
 
@@ -135,7 +135,7 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
     run, start = Run(goal, check, workdir, list(protect), provider.describe(), limits, folder), clock()
 
     def time_left():
-        run.seconds = clock() - start
+        run.seconds = round(clock() - start, 1)
         return limits.max_seconds - run.seconds
 
     guarded = fingerprint(workdir, run.protect)                     # setup: hash every --protect path
@@ -271,6 +271,6 @@ def report(run):
         lines.append(f"  worker's last words (unverified): \"{' '.join(run.last_words.split())[:300]}\"")
     if last and last.output.strip():
         lines += ["  check output (tail):"]
-        lines += [f"    {line}" for line in last.output.strip().splitlines()[-6:]]
+        lines += [f"    {line}".rstrip() for line in last.output.strip().splitlines()[-6:]]
     lines.append(f"  records   {run.folder}/")
     return "\n".join(lines)
