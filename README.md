@@ -112,6 +112,22 @@ The loop writes nothing outside `--dir`. Claude Code keeps its own transcript of
 call in its config folder, which is outside this program. To read one, run
 `claude --resume <session id from call.json>` from the same folder.
 
+## Use it as a Claude Code skill
+
+The repo root holds a `SKILL.md`, so a clone in your personal skills folder is a Claude
+Code skill:
+
+```bash
+git clone https://github.com/ydmitry/subgoal-skill ~/.claude/skills/subgoal-skill
+```
+
+Claude Code then offers it as `/subgoal`, and may pick it on its own for a task with a
+checkable finish line. The skill turns your request into a goal and a check, shows you
+the dry run, starts the real run in the background once you say yes, and reads the
+report when the run ends. It runs the same `python3 -m subgoal` command from its own
+folder (`${CLAUDE_SKILL_DIR}`), with your project as an absolute `--dir`. Everything in
+the safety section above still applies.
+
 ## How a run ends
 
 | Stop reason | Meaning | Exit code |
