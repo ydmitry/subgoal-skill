@@ -170,7 +170,7 @@ def _steps(run, provider, guarded, time_left):
             reply = provider.run(prompt, run.dir, time_left())      # c: a fresh session
         except ProviderError as error:
             run.error = str(error)
-            write_json(step / "call.json", {"error": run.error})
+            write_json(step / "call.json", {"error": run.error, "seconds": round(time.monotonic() - began)})
             return StopReason.OUT_OF_TIME if time_left() <= 0 else StopReason.PROVIDER_FAILED
         worker_s = time.monotonic() - began
         (step / "reply.md").write_text(reply.text + "\n")           # d: kept for you, not the model
