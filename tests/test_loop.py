@@ -13,25 +13,22 @@ Every stop reason has at least one test:
 """
 import io
 import json
-import os
 import shlex
 import shutil
 import sys
 import tempfile
-import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from fake import FakeProvider, edit, fail, notes, say
+from fake import FakeProvider, edit, fail, gone, notes, say
 from subgoal import loop
 from subgoal.loop import Limits, StopReason as R, run_loop
 from subgoal.provider import ProviderError, Reply
 
 PY = shlex.quote(sys.executable)
 CHECK = f"{PY} -c \"s = open('app.py').read(); print('app.py says', s); exit('done' not in s)\""
-HANG = f"{PY} -c \"import os, time; open('pid', 'w').write(str(os.getpid())); time.sleep(30)\""
 
 
 class LoopTest(unittest.TestCase):
@@ -131,10 +128,11 @@ class LoopTest(unittest.TestCase):
 
     def test_L12_check_timeout(self):
         with mock.patch.object(loop, "CHECK_TIMEOUT_S", 0.3):
-            run = self.go([say()], check=HANG, limits=Limits(max_iterations=1))
+            hang = f"{PY} -c 'import time; time.sleep(30)' {shlex.quote(str(self.dir))}"
+            run = self.go([say()], check=hang, limits=Limits(max_iterations=1))
         self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=1)
         self.assertIn("timed out", (run.folder / "01" / "check.txt").read_text())
-        self.assertTrue(gone(int((self.dir / "pid").read_text())))
+        self.assertTrue(gone(str(self.dir)))
 
     def test_L13_records(self):
         run = self.go([say(), edit("app.py", "done\n")])
@@ -145,17 +143,6 @@ class LoopTest(unittest.TestCase):
         self.assertEqual((saved["stop_reason"], saved["steps"]), ("goal_met", 2))
         self.assertEqual((run.folder / "report.md").read_text(), self.printed)
         self.assertEqual((run.folder / "01" / "prompt.md").read_text(), self.fake.prompts[0])
-
-
-def gone(pid):
-    """True once the process has exited (allowing a moment for it to be reaped)."""
-    for _ in range(50):
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return True
-        time.sleep(0.02)
-    return False
 
 
 if __name__ == "__main__":

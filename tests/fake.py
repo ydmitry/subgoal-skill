@@ -1,4 +1,6 @@
 """FakeProvider: plays scripted steps instead of calling an agent, and records what it got."""
+import subprocess
+import time
 from pathlib import Path
 
 from subgoal.provider import Reply
@@ -45,3 +47,13 @@ def fail(error):
     def step(workdir):
         raise error
     return step
+
+
+def gone(marker):
+    """True once no running process has `marker` (a unique temp path) in its command line."""
+    for _ in range(50):
+        ps = subprocess.run(["ps", "-A", "-o", "args="], capture_output=True, text=True)
+        if marker not in ps.stdout:
+            return True
+        time.sleep(0.02)
+    return False
