@@ -17,6 +17,9 @@ class ProviderError(Exception):
 
 
 class Provider(Protocol):
+    """A provider's constructor also takes `read_only=False`. With True, every session it
+    starts must be unable to edit anything, and describe() says so. The judge is one."""
+
     def describe(self) -> str:
         """One line: which tool, model and permissions every call will use.
         Written to run.json and to the report."""

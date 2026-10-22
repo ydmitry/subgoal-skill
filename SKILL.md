@@ -1,22 +1,22 @@
 ---
 name: subgoal
-description: Use for a coding task with a checkable finish line (a command such as a test suite that exits 0 once the work is done) that needs more than a few tool calls. Runs Claude Code headless in a bounded loop of fresh sessions until that command passes.
+description: Use for a task in a folder that needs more than a few tool calls and has a finish line that can be checked, either a command that exits 0 (best: a test suite) or written-out done criteria that a read-only judge can check. Runs Claude Code headless in a bounded loop of fresh sessions until the finish line is met.
 ---
 
 # subgoal: a bounded loop toward a checkable goal
 
-`python3 -m subgoal`, in this skill's folder, calls `claude -p` in a fresh session each
-time and runs the check itself after every call, until it exits 0 or a budget runs out.
+`python3 -m subgoal`, in this skill's folder, calls `claude -p` in fresh sessions until the
+goal is met or a budget ends. A check command decides, or, with no command, a read-only judge.
 
-## 1. Turn the request into a goal and a check
+## 1. Turn the request into a goal, and a check when one exists
 
-- **Goal:** one measurable end state, in one or two sentences, plus any constraint
-  that matters ("without editing the tests").
-- **Check:** one shell command, run in the project folder, that exits 0 only when the
-  goal holds. Tests make the best checks. Never use a check that passes trivially.
-- **Protect the finish line:** `--protect` the test files, or the check script, so the
-  worker cannot change them. Put a compound check (`&&`, `|`) in a script. If the goal
-  or the check is unclear, ask the user before going on.
+- **Goal:** observable done criteria in a few short lines: what a reader can see in the
+  files when it is done, plus any constraint that matters ("without editing the tests").
+- **Check:** when a command can tell (tests, a build, a linter), add `--check`: a shell
+  command or a script (`--check ./check.sh`), run in the project folder, that exits 0 only
+  when the goal holds. Never one that passes trivially. Without it, a judge decides (opinion).
+- **Protect the finish line:** `--protect` the test files, the check script, or any file the
+  work must not change. Put a compound check (`&&`, `|`) in a script. If unclear, ask the user.
 
 ## 2. Launch: dry run first, then the real run in the background
 
@@ -28,9 +28,9 @@ Pass the project folder as an absolute `--dir`. Never `$HOME` or `/`.
   --check "python3 -m unittest discover -s tests" --protect tests --dry-run)
 ```
 
-Show the user the dry run's provider command and first prompt, and get a yes. Then run
-the same command without `--dry-run`, as a background command. Options:
-`--max-iterations N` (default 5), `--max-minutes M` (30), `--max-tokens T`, `--model NAME`.
+Show the user the dry run's provider command(s) and first prompt, and get a yes. Then run
+it without `--dry-run`, as a background command. Options: `--max-iterations N` (default 5),
+`--max-minutes M` (30), `--max-tokens T`, `--model NAME`, `--judge-model NAME` (no `--check`).
 
 ## 3. Read the result
 
@@ -38,20 +38,20 @@ You are told when the background command exits. Read its report, then act on its
 
 | Exit | Stop reason | Next |
 |---|---|---|
-| 0 | goal_met | Show the diff. The check proves what it tests, nothing more. |
-| 1 | out_of_iterations, out_of_time, out_of_tokens | Read `notes.md` and the last `check.txt`; refine the goal or a limit; ask before another run. |
+| 0 | goal_met | Show the diff. A check proves what it tests; a judge's "met" is an opinion. |
+| 1 | out_of_iterations, out_of_time, out_of_tokens | Read `notes.md` and the last `check.txt` or `judge.md`; refine the goal or a limit; ask before another run. |
 | 2 | bad arguments | Fix the command. |
 | 3 | provider_failed, protected_file_changed | Quote the error. For a protected change, show the diff. |
 | 130 | interrupted | Stop. |
 
 Records are in `<dir>/.subgoal/<run-id>/`: `report.md`, `run.json`, `notes.md`, and per
-step `NN/prompt.md`, `NN/reply.md`, `NN/call.json`, `NN/check.txt`.
+step `NN/prompt.md`, `reply.md`, `call.json`, and `check.txt` or `judge.md`.
 
 ## Safety
 
-The loop runs a coding agent unattended, as the user: it edits files in `--dir` and can
-run any code the check runs; hooks and MCP servers in that folder run too. Prefer a
-throwaway copy or a clean git state, and read the diff before trusting it.
+The loop runs a coding agent unattended, as the user: it edits files in `--dir` and can run
+any code the check runs; hooks and MCP servers in that folder run too. A judge cannot run
+the project's code, so prefer a check when one exists. Use a throwaway copy and read the diff.
 
 ## Do not
 

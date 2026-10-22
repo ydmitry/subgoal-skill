@@ -1,6 +1,7 @@
-"""The loop: call the agent in fresh sessions until the check passes or a budget ends the run.
+"""The loop: call the agent in fresh sessions until the finish line says met or a budget ends the run.
 
-Read this file first. Nothing in it knows which agent sits behind `provider`.
+The finish line is a check command, or, with no command, a judge (judge.py).
+Read this file first. Nothing in it knows which agent sits behind `provider` or `judge`.
 """
 import hashlib
 import json
@@ -10,6 +11,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 
+from .judge import Verdict, judge_prompt, parse_verdict
 from .process import run_process
 from .provider import Provider, ProviderError
 
@@ -25,9 +27,7 @@ GOAL
 {goal}
 
 FINISH LINE
-After you stop, the loop runs this command in this folder: {check}
-The goal counts as met only when that command exits 0. You cannot declare it met.
-You may run the command yourself to see where things stand.
+{finish}
 
 RULES
 - Work on the most important remaining part. One thing done fully beats many half-done.
@@ -38,9 +38,18 @@ RULES
 NOTES FROM EARLIER STEPS
 {notes}
 
-LAST CHECK (after step {step}, exit code {code}, last 4,000 characters of output)
-{tail}
+{last}
 """
+
+FINISH_CHECK = """\
+After you stop, the loop runs this command in this folder: {check}
+The goal counts as met only when that command exits 0. You cannot declare it met.
+You may run the command yourself to see where things stand."""
+
+FINISH_JUDGE = """\
+After you stop, a separate reviewer reads your result against the goal and decides.
+You cannot declare it met. The reviewer looks at the real files, not at what you say,
+and assumes you may have overclaimed: make every part of the goal true and visible there."""
 
 
 class StopReason(str, Enum):
@@ -81,7 +90,7 @@ class CheckResult:
 class Run:
     """The run so far. Saved as run.json after every step; the report reads nothing else."""
     goal: str
-    check: str
+    check: str | None        # None: no command, so a judge decides
     dir: Path
     protect: list
     provider: str            # provider.describe(): the tool, model and permissions used
@@ -96,6 +105,9 @@ class Run:
     cost_usd: float | None = None
     last_words: str | None = None    # the worker's last reply: recorded, never trusted
     last_check: CheckResult | None = None
+    judge: str | None = None         # judge.describe(); None when a check command is the finish line
+    judge_calls: int = 0
+    last_verdict: Verdict | None = None
 
 
 def run_check(check, workdir, timeout_s, step=0):
@@ -107,13 +119,26 @@ def run_check(check, workdir, timeout_s, step=0):
 
 
 def build_prompt(goal, check, protect, notes_path, notes, last):
-    """The same template, in the same order, every step. Built from files, never from chat."""
+    """The same template, in the same order, every step. Built from files, never from chat.
+
+    `last` is the last CheckResult (the pre-check, before step 1), or, with no check
+    command, the last Verdict (None before step 1)."""
     if len(notes) > NOTES_CAP:
         notes = notes[:NOTES_CAP] + f"\n[... notes cut at {NOTES_CAP:,} characters]"
-    first = "(none yet: this is the first step)" if last.step == 0 else "(none: no notes were left)"
-    return PROMPT.format(goal=goal.strip(), check=check, protected=", ".join(protect) or "(none)",
-                         notes_path=notes_path, notes=notes.strip() or first, step=last.step,
-                         code=last, tail=last.output.strip() or "(no output)")
+    new = last is None or last.step == 0
+    if check is None:
+        finish = FINISH_JUDGE
+        seen = "LAST REVIEW (none yet: this is the first step)" if new else (
+            f"LAST REVIEW (after step {last.step}: a reviewer's opinion, not a command result)\n"
+            f"{last.reasons}")
+    else:
+        finish = FINISH_CHECK.format(check=check)
+        seen = f"LAST CHECK (after step {last.step}, exit code {last}, last 4,000 characters of output)\n" \
+               f"{last.output.strip() or '(no output)'}"
+    return PROMPT.format(goal=goal.strip(), finish=finish, protected=", ".join(protect) or "(none)",
+                         notes_path=notes_path, last=seen,
+                         notes=notes.strip() or ("(none yet: this is the first step)" if new
+                                                 else "(none: no notes were left)"))
 
 
 def safe_workdir(path):
@@ -125,14 +150,19 @@ def safe_workdir(path):
 
 
 def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=(),
-             clock=time.monotonic):
-    """Run the loop to its end and return the Run. Progress goes to stderr, the report to stdout."""
+             clock=time.monotonic, judge: Provider | None = None):
+    """Run the loop to its end and return the Run. Progress goes to stderr, the report to stdout.
+
+    The finish line is `check`, a command, or else `judge`, a read-only provider. Exactly one."""
+    if (check is None) == (judge is None):
+        raise ValueError("a run needs a check command or a judge: exactly one of them")
     workdir = safe_workdir(workdir)
     folder = workdir / ".subgoal" / time.strftime("%Y%m%d-%H%M%S", time.gmtime())   # run id: UTC start
     while folder.exists():                                          # a second run in the same second
         folder = folder.with_name(folder.name + "b")
     folder.mkdir(parents=True)
-    run, start = Run(goal, check, workdir, list(protect), provider.describe(), limits, folder), clock()
+    run, start = Run(goal, check, workdir, list(protect), provider.describe(), limits, folder,
+                     judge=judge.describe() if judge else None), clock()
 
     def time_left():
         run.seconds = round(clock() - start, 1)
@@ -141,7 +171,7 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
     guarded = fingerprint(workdir, run.protect)                     # setup: hash every --protect path
     save(run)
     try:
-        run.stop_reason = _steps(run, provider, guarded, time_left)
+        run.stop_reason = _steps(run, provider, judge, guarded, time_left)
     except KeyboardInterrupt:
         run.stop_reason = StopReason.INTERRUPTED
     time_left()
@@ -153,17 +183,19 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
     return run
 
 
-def _steps(run, provider, guarded, time_left):
-    run.last_check = _check(run, 0)                                 # step 0: the pre-check
-    if run.last_check.exit_code == 0:
-        return StopReason.GOAL_MET
+def _steps(run, provider, judge, guarded, time_left):
+    if judge is None:                                               # step 0: the pre-check
+        run.last_check = _check(run, 0)
+        if run.last_check.exit_code == 0:
+            return StopReason.GOAL_MET
     for i in range(1, run.limits.max_iterations + 1):
         if time_left() <= 0:                                        # a
             return StopReason.OUT_OF_TIME
         step, notes = run.folder / f"{i:02d}", run.folder / "notes.md"
         step.mkdir()
         prompt = build_prompt(run.goal, run.check, run.protect, notes.relative_to(run.dir),
-                              notes.read_text() if notes.exists() else "", run.last_check)
+                              notes.read_text() if notes.exists() else "",
+                              run.last_check if judge is None else run.last_verdict)
         (step / "prompt.md").write_text(prompt)                     # b: built from files only
         run.steps, began = i, time.monotonic()
         try:
@@ -181,18 +213,49 @@ def _steps(run, provider, guarded, time_left):
         if changed:                                                 # e: the finish line was moved
             run.error = "the worker changed protected paths: " + ", ".join(changed)
             return StopReason.PROTECTED_FILE_CHANGED
-        run.last_check = _check(run, i)                             # f: the loop checks, not the agent
-        verdict = "met" if run.last_check.exit_code == 0 else "not met"
+        if judge is None:
+            run.last_check = _check(run, i)                         # f: the loop checks, not the agent
+            met = run.last_check.exit_code == 0
+            said = f"check exit {run.last_check} ({'met' if met else 'not met'})"
+        else:
+            if stop := _budget(run, time_left):                     # f: no judge call past a limit
+                return stop
+            try:
+                run.last_verdict = _judge(run, judge, step, time_left)
+            except ProviderError as error:
+                run.error = f"the judge failed: {error}"
+                return StopReason.OUT_OF_TIME if time_left() <= 0 else StopReason.PROVIDER_FAILED
+            met, said = run.last_verdict.met, f"judge: {run.last_verdict}"
         print(f"step {i}/{run.limits.max_iterations}  worker {mmss(worker_s)}  "
-              f"{count(reply.tokens)} tokens  check exit {run.last_check} ({verdict})", file=sys.stderr)
+              f"{count(reply.tokens)} tokens  {said}", file=sys.stderr)
         save(run)
-        if run.last_check.exit_code == 0:                           # g
+        if met:                                                     # g
             return StopReason.GOAL_MET
-        if run.limits.max_tokens and (run.tokens or 0) >= run.limits.max_tokens:
-            return StopReason.OUT_OF_TOKENS                         # h
-        if time_left() <= 0:
-            return StopReason.OUT_OF_TIME
+        if stop := _budget(run, time_left):                         # h
+            return stop
     return StopReason.OUT_OF_ITERATIONS
+
+
+def _budget(run, time_left):
+    """The stop reason if a limit is reached, else None."""
+    if run.limits.max_tokens and (run.tokens or 0) >= run.limits.max_tokens:
+        return StopReason.OUT_OF_TOKENS
+    if time_left() <= 0:
+        return StopReason.OUT_OF_TIME
+
+
+def _judge(run, judge, step, time_left):
+    """Ask a fresh read-only session if the goal is met. The worker's last words go in as a claim.
+    Records NN/judge-prompt.md, judge.md and judge-call.json; raises ProviderError like any call."""
+    prompt, began = judge_prompt(run.goal, run.dir, run.last_words), time.monotonic()
+    (step / "judge-prompt.md").write_text(prompt)
+    run.judge_calls += 1
+    reply = judge.run(prompt, run.dir, time_left())
+    (step / "judge.md").write_text(reply.text + "\n")
+    write_json(step / "judge-call.json", dict(asdict(reply), text="(judge.md)",
+                                              seconds=round(time.monotonic() - began)))
+    run.tokens, run.cost_usd = add(run.tokens, reply.tokens), add(run.cost_usd, reply.cost_usd)
+    return parse_verdict(reply.text, run.steps)
 
 
 def _check(run, step):
@@ -241,12 +304,15 @@ def mmss(seconds):
 
 
 def report(run):
-    """The final report, printed and saved as report.md. Only the check can make it say GOAL MET."""
-    last, limits = run.last_check, run.limits
+    """The final report, printed and saved as report.md. Only the finish line can make it say GOAL MET."""
+    last, limits = run.last_check or run.last_verdict, run.limits
+    judged = run.judge is not None
     if run.stop_reason is StopReason.GOAL_MET:
         when = f"after step {last.step}" if last.step else "at the pre-check, before any step"
-        lines = [f"subgoal: GOAL MET {when}: the check exited 0",
-                 "  This proves what the check tests and nothing more. Read the diff."]
+        said = "a judge said met" if judged else "the check exited 0"
+        caveat = ("That is a model's opinion of the files, not a test result." if judged else
+                  "This proves what the check tests and nothing more.")
+        lines = [f"subgoal: GOAL MET {when}: {said}", f"  {caveat} Read the diff."]
     else:
         lines = [f"subgoal: GOAL NOT MET ({run.stop_reason.value})"]
     limit = f"limit {limits.max_tokens:,}" if limits.max_tokens else "no limit set"
@@ -257,20 +323,32 @@ def report(run):
         f"${run.cost_usd:.2f} (the provider's own estimate; a subscription is not billed per call)"
     if run.steps == 0:
         tokens = cost = "none (no worker calls)"
-    ran = f"last run after step {last.step}: exit {last}" if last else "did not finish"
+    if judged:
+        ran = f"last verdict after step {last.step}: {last}" if last else "no verdict yet"
+        finish = f"judge     no check command: a read-only agent decides      {ran}"
+    else:
+        ran = f"last run after step {last.step}: exit {last}" if last else "did not finish"
+        finish = f"check     {run.check}      {ran}"
+    calls = f" (judge calls: {run.judge_calls})" if judged else ""
     lines += [f"  goal      {' '.join(run.goal.split())}",
-              f"  check     {run.check}      {ran}",
-              f"  steps     {run.steps} of {limits.max_iterations} worker calls",
-              f"  time      {mmss(run.seconds)} of {mmss(limits.max_seconds)} (checks included)",
+              f"  {finish}",
+              f"  steps     {run.steps} of {limits.max_iterations} worker calls{calls}",
+              f"  time      {mmss(run.seconds)} of {mmss(limits.max_seconds)} "
+              f"({'judge calls' if judged else 'checks'} included)",
               f"  tokens    {tokens}",
               f"  cost      {cost}",
               f"  provider  {run.provider}"]
+    if judged:
+        lines.append(f"  judge via {run.judge}")
     if run.error:
         lines.append(f"  error     {run.error}")
     if run.last_words is not None:
         lines.append(f"  worker's last words (unverified): \"{' '.join(run.last_words.split())[:300]}\"")
-    if last and last.output.strip():
-        lines += ["  check output (tail):"]
-        lines += [f"    {line}".rstrip() for line in last.output.strip().splitlines()[-6:]]
+    detail = last and (last.reasons if judged else last.output)
+    if detail and detail.strip():
+        lines.append("  judge's reasons (a model's opinion; first lines):" if judged else
+                     "  check output (tail):")
+        shown = detail.strip().splitlines()
+        lines += [f"    {line}".rstrip() for line in (shown[:6] if judged else shown[-6:])]
     lines.append(f"  records   {run.folder}/")
     return "\n".join(lines)

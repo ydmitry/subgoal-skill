@@ -11,18 +11,32 @@ RESUME_ID_KEY = "session" + "_id"
 # The token counts in claude's "usage" object. Their sum is the call's token total.
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens",
                 "cache_read_input_tokens")
+# What a read-only session may use: look at files, and look at git. Nothing else.
+READ_ONLY_ALLOW = ("Read", "Grep", "Glob", "Bash(git status *)", "Bash(git diff *)",
+                   "Bash(git log *)", "Bash(git show *)")
+READ_ONLY_DENY = ("Bash(*--output*)",)     # `git diff --output=FILE` would write a file
 
 
 class ClaudeCode:
     """Every call runs the same command, so the permissions are fixed here, once."""
 
-    def __init__(self, model=None, allow=(), executable="claude"):
+    def __init__(self, model=None, allow=(), executable="claude", read_only=False):
         # -p                       headless, and a new session: no --continue or --resume
         # --output-format json     one result object to parse
         # acceptEdits              file edits and simple file commands, inside the folder only
+        # dontAsk (read_only)      deny everything the allow list does not name
         # --permission-prompts     nobody is there to answer a prompt, so it is denied
+        self.read_only = read_only
+        mode = "dontAsk" if read_only else "acceptEdits"
         self.argv = [executable, "-p", "--output-format", "json",
-                     "--permission-mode", "acceptEdits", "--permission-prompts", "none"]
+                     "--permission-mode", mode, "--permission-prompts", "none"]
+        if read_only:
+            # --tools                the edit and write tools do not exist in this session
+            # --strict-mcp-config    no MCP tools, which could write outside the folder
+            # --disallowedTools      beats the allow list, which `git diff --output=FILE` would slip past
+            self.argv += ["--tools", "Read,Grep,Glob,Bash", "--strict-mcp-config",
+                          "--disallowedTools", *READ_ONLY_DENY]
+            allow = READ_ONLY_ALLOW                    # the caller's extra rules never widen it
         if model:
             self.argv += ["--model", model]
         if allow:
@@ -30,7 +44,8 @@ class ClaudeCode:
 
     def describe(self):
         model = "" if "--model" in self.argv else ", your default model"
-        return f"{shlex.join(self.argv)}  (prompt on stdin{model})"
+        only = ", read-only: edits are denied" if self.read_only else ""
+        return f"{shlex.join(self.argv)}  (prompt on stdin{model}{only})"
 
     def run(self, prompt, workdir, timeout_s):
         try:

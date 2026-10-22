@@ -15,7 +15,7 @@ from unittest import mock
 
 from fake import gone
 from subgoal import claude_code
-from subgoal.claude_code import ClaudeCode, parse
+from subgoal.claude_code import READ_ONLY_ALLOW, READ_ONLY_DENY, ClaudeCode, parse
 from subgoal.provider import ProviderError
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -41,6 +41,32 @@ class ClaudeCodeTest(unittest.TestCase):
         self.assertNotIn("--model", ClaudeCode().argv)
         for unsafe in ("dangerously-skip-permissions", "bypassPermissions"):     # safety regression
             self.assertNotIn(unsafe, " ".join(argv) + provider.describe())
+
+    def test_C1b_read_only_argv(self):
+        seen = []
+
+        def fake_run_process(cmd, cwd, timeout_s, stdin=None):
+            seen.append(cmd)
+            return 0, OK, "", False
+        provider = ClaudeCode(model="claude-haiku-5-5", allow=["Edit", "Bash(rm -rf *)"], read_only=True)
+        with mock.patch.object(claude_code, "run_process", fake_run_process):
+            provider.run("THE PROMPT", Path("."), 60)
+        argv = seen[0]
+        self.assertEqual(argv, ["claude", "-p", "--output-format", "json",
+                                "--permission-mode", "dontAsk", "--permission-prompts", "none",
+                                "--tools", "Read,Grep,Glob,Bash", "--strict-mcp-config",
+                                "--disallowedTools", *READ_ONLY_DENY,
+                                "--model", "claude-haiku-5-5", "--allowedTools", *READ_ONLY_ALLOW])
+        self.assertEqual(READ_ONLY_DENY, ("Bash(*--output*)",))        # git's own way to write a file
+        for edit_ish in ("acceptEdits", "Edit", "Write", "NotebookEdit", "Bash(rm -rf *)"):
+            self.assertNotIn(edit_ish, argv)                           # the caller's rules never widen it
+        self.assertEqual(set(argv[argv.index("--tools") + 1].split(",")), {"Read", "Grep", "Glob", "Bash"})
+        for rule in READ_ONLY_ALLOW:
+            self.assertRegex(rule, r"^(Read|Grep|Glob|Bash\(git (status|diff|log|show) \*\))$")
+        for unsafe in ("dangerously-skip-permissions", "bypassPermissions"):
+            self.assertNotIn(unsafe, " ".join(argv) + provider.describe())
+        self.assertIn("read-only", provider.describe())
+        self.assertNotIn("read-only", ClaudeCode().describe())
 
     def test_C2_parse_ok(self):
         self.assertIsNone(parse(0, OK, "").session)       # the fixture has no session id: unknown

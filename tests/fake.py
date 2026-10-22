@@ -25,6 +25,11 @@ def say(text="I worked on it.", tokens=None, cost=None):
     return lambda workdir: Reply(text, tokens, cost)
 
 
+def judges(met, reasons="Reasons.", tokens=None):
+    """A judge's reply: short reasons, then the verdict line."""
+    return say(f"{reasons}\nVERDICT: {'met' if met else 'not met'}", tokens)
+
+
 def edit(path, content, text="I edited a file.", tokens=None):
     """A step that writes one file (relative to the workdir), then replies."""
     def step(workdir):
