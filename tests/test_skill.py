@@ -18,6 +18,14 @@ class SkillTest(unittest.TestCase):
         self.assertTrue(SKILL.startswith("---\nname: subgoal\ndescription: "))
         self.assertLessEqual(len(SKILL.splitlines()), 60)
 
+    def test_frontmatter_is_valid_yaml(self):
+        """The standard library has no YAML parser, so check the two things that break a plain value."""
+        for line in SKILL.split("---\n")[1].splitlines():
+            key, value = line.split(": ", 1)
+            if not value.startswith(("'", '"')):
+                self.assertNotIn(": ", value, f"{key}: a colon and a space starts a new key in YAML")
+                self.assertNotIn(" #", value, f"{key}: a space and # starts a comment in YAML")
+
     def test_every_flag_exists(self):
         flags = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", SKILL))
         self.assertIn("--dry-run", flags)

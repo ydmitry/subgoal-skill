@@ -1,6 +1,6 @@
 ---
 name: subgoal
-description: Use for a task in a folder that needs more than a few tool calls and has a finish line that can be checked, either a command that exits 0 (best: a test suite) or written-out done criteria that a read-only judge can check. Runs Claude Code headless in a bounded loop of fresh sessions until the finish line is met.
+description: Use for a task in a folder that needs more than a few tool calls and has a finish line that can be checked, either a command that exits 0 (ideally a test suite) or written-out done criteria that a read-only judge can check. Runs Claude Code headless in a bounded loop of fresh sessions until the finish line is met.
 ---
 
 # subgoal: a bounded loop toward a checkable goal
