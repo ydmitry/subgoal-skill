@@ -399,7 +399,6 @@ parts between those two.
   [permission modes](https://code.claude.com/docs/en/permission-modes) and
   [permission rules](https://code.claude.com/docs/en/permissions).
 
-## License and affiliation
+## License
 
-MIT, see [LICENSE](LICENSE). A personal educational project, not affiliated with any
-employer or with Anthropic.
+MIT, see [LICENSE](LICENSE).
