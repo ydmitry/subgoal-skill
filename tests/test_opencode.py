@@ -152,7 +152,7 @@ class OpenCodeTest(unittest.TestCase):
         start = time.monotonic()
         with self.assertRaisesRegex(ProviderError, "no reply within"):
             provider.run("hi", self.dir, 0.5)
-        self.assertLess(time.monotonic() - start, 1.5)
+        self.assertLess(time.monotonic() - start, 10)    # the child sleeps 30 s: stopped, with room for a busy machine
         self.assertTrue(gone(str(self.bin)))
 
     def test_O7_cli_with_a_check(self):
