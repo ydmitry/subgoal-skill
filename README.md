@@ -149,10 +149,11 @@ the report at the end. The safety section applies unchanged.
 |---|---|---|
 | `claude-code` (default) | `claude -p`, a new session per call | The worker edits files and runs only the check you pass. |
 | `opencode` | `opencode run` (opencode 1.x), a new session per call | The worker may run any shell command in the folder. The judge can only read and run `git status`, `diff`, `log` and `show`. `--allow` is refused. |
-| `opencode2` | `opencode2 run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge is read-only as above and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
+| `opencode2` | `opencode run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge is read-only as above and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
 
 Works with a recent Claude Code (last tried with 2.1.307), opencode 1.x (1.19.3) and opencode 2 (2.1.4).
-opencode 2's installer puts an `opencode2` command next to `opencode`; the provider calls that one.
+For opencode 2 the provider uses `opencode2` if it is on your PATH (its installer adds one), else `opencode`,
+and refuses any binary that does not report version 2.
 Adding another provider is small: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How a run ends

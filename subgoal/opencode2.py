@@ -3,6 +3,7 @@
 Its events are opencode 1's, so opencode.parse reads them. What differs is how a call is set up.
 """
 import json
+import re
 import shlex
 import shutil
 
@@ -11,6 +12,7 @@ from .process import run_process
 from .provider import ProviderError
 
 AGENT = "subgoal"    # every call runs as this agent, which the call's own config defines
+VERSION_TIMEOUT_S = 15
 
 
 def rule(action, resource, effect):
@@ -33,7 +35,7 @@ READ_ONLY_RULES = [rule("*", "*", "deny"), *(rule(action, "*", "allow") for acti
 class OpenCode2:
     """Every call runs the same command with the same config, so the permissions are fixed here, once."""
 
-    def __init__(self, model=None, allow=(), executable="opencode2", read_only=False):
+    def __init__(self, model=None, allow=(), executable=None, read_only=False):
         # run --standalone         a private server that lives as long as this call. The shared
         #                          background service is never used: it would not see this config
         # env -u PWD               opencode takes its folder from $PWD before its cwd, which is DIR
@@ -44,7 +46,9 @@ class OpenCode2:
         # no project config        (read_only) no opencode config or plugins from DIR: plugin code
         #                          could write
         # allow                    Claude Code rules, unused, as for opencode 1
-        self.read_only, self.executable = read_only, executable
+        # executable               default: opencode2 (the installer's name) if on PATH, else opencode
+        executable = executable or ("opencode2" if shutil.which("opencode2") else "opencode")
+        self.read_only, self.executable, self.version = read_only, executable, None
         config = {"agents": {AGENT: {"mode": "primary",
                                      "permissions": READ_ONLY_RULES if read_only else WORKER_RULES}}}
         self.argv = ["env", "-u", "PWD", *(["OPENCODE_DISABLE_PROJECT_CONFIG=1"] if read_only else []),
@@ -61,7 +65,23 @@ class OpenCode2:
     def run(self, prompt, workdir, timeout_s):
         if not shutil.which(self.executable):           # `env` would start, then not find it
             raise ProviderError(f"{self.executable} not found: is opencode 2 on PATH?")
+        if self.version is None:                        # before any prompt is sent, once
+            self.version = check_version(self.executable, workdir)
         code, out, err, timed_out = run_process(self.argv, workdir, timeout_s, stdin=prompt)
         if timed_out:
             raise ProviderError(f"no reply within {timeout_s:.0f}s; the call was stopped")
         return parse(code, out, err)
+
+
+def check_version(executable, workdir):
+    """The version the binary reports, if it is opencode 2. opencode 1 takes the same flags, but
+    runs a session whose agent it cannot find as another agent, which can edit: a judge that writes."""
+    code, out, err, timed_out = run_process([executable, "--version"], workdir, VERSION_TIMEOUT_S)
+    found = re.fullmatch(r"(?:opencode )?v?(\d+)\.\d+\.\d+\S*", out.strip())
+    if timed_out or code != 0 or not found:
+        said = (out + err).strip()[-200:] or "no output"
+        raise ProviderError(f"{executable} --version gave no opencode version (exit {code}): {said}")
+    if found.group(1) != "2":
+        raise ProviderError(f"{executable} is opencode {out.strip()}, not opencode 2: "
+                            "for opencode 1.x use --provider opencode")
+    return out.strip()

@@ -52,8 +52,12 @@ class OpenCode2Test(unittest.TestCase):
     def fake(self, replies):
         return fake_opencode(self.bin, "opencode2", replies)
 
-    def calls(self):
+    def all_calls(self):
         return json.loads((self.bin / "calls.json").read_text())
+
+    def calls(self):
+        """The fake's calls that carry a prompt: each instance also asks for --version once."""
+        return [call for call in self.all_calls() if call["argv"] != ["--version"]]
 
     def subgoal(self, *argv):
         """`python -m subgoal --provider opencode2` with only the fake on PATH, and a $PWD that is not DIR."""
@@ -131,6 +135,43 @@ class OpenCode2Test(unittest.TestCase):
         provider = OpenCode2(executable=self.fake([{"stderr": "Error: Agent not found", "exit": 1}]))
         with self.assertRaisesRegex(ProviderError, r"exit 1\): Error: Agent not found"):
             provider.run("hi", self.dir, 30)
+
+    def test_P4b_which_opencode(self):
+        path = os.pathsep.join([str(self.bin), "/usr/bin", "/bin"])
+        fake_opencode(self.bin, "opencode", [{"stdout": OK}])
+        with mock.patch.dict(os.environ, PATH=path):
+            provider = OpenCode2()                           # opencode 2 under its plain name
+            provider.run("hi", self.dir, 30)
+            self.assertEqual([(c["name"], c["argv"][0]) for c in self.all_calls()],
+                             [("opencode", "--version"), ("opencode", "run")])
+            self.fake([{"stdout": OK}])
+            self.assertEqual(OpenCode2().executable, "opencode2")              # the installer's name first
+            self.assertEqual(OpenCode2(executable="opencode").executable, "opencode")
+        self.assertIn(" opencode2 run ", OpenCode2(executable="opencode2").describe())
+
+    def test_P4c_opencode_1_is_refused_before_a_prompt(self):
+        provider = OpenCode2(executable=fake_opencode(self.bin, "opencode", [{"stdout": OK}], version="1.19.3\n"),
+                             read_only=True)
+        with self.assertRaisesRegex(ProviderError, r"is opencode 1\.19\.3, not opencode 2: for opencode 1\.x "
+                                                   r"use --provider opencode$"):
+            provider.run("You are a reviewer.", self.dir, 30)
+        (call,) = self.all_calls()                           # the --version call, and no prompt
+        self.assertEqual((call["argv"], call["stdin"]), (["--version"], ""))
+        self.assertEqual(Path(call["cwd"]).resolve(), self.dir.resolve())
+
+    def test_P4d_no_version_no_call(self):
+        for version in ("opencode, an agent\n", "", None, "opencode v2\n", "2.1.4 and more\n"):
+            fake = fake_opencode(self.bin, "opencode2", [{"stdout": OK}], version=version)
+            with self.subTest(version=version), self.assertRaisesRegex(ProviderError, "gave no opencode version"):
+                OpenCode2(executable=fake).run("hi", self.dir, 30)
+        self.assertEqual(self.calls(), [])
+
+    def test_P4e_version_once_per_instance(self):
+        provider = OpenCode2(executable=self.fake([{"stdout": OK}, {"stdout": OK}]))
+        provider.run("one", self.dir, 30)
+        provider.run("two", self.dir, 30)
+        self.assertEqual([c["argv"][0] for c in self.all_calls()], ["--version", "run", "run"])
+        self.assertEqual(provider.version, "opencode v2.1.4")
 
     def test_P5_timeout_stops_the_child(self):
         provider = OpenCode2(executable=self.fake([{"sleep": 30}]))
