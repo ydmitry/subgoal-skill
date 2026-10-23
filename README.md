@@ -42,7 +42,8 @@ folder, the worker's own `notes.md`, and the last check output or judge verdict.
 ## Quick start
 
 You need Python 3.10+ and a coding agent that is logged in: Claude Code (the default) or
-[opencode](https://opencode.ai) with `--provider opencode`. There is nothing to install.
+[opencode](https://opencode.ai) (`--provider opencode` for 1.x, `--provider opencode2` for 2).
+There is nothing to install.
 
 Try it on the fizzbuzz example. A run edits files, so it works on a throwaway copy:
 
@@ -147,9 +148,11 @@ the report at the end. The safety section applies unchanged.
 | `--provider` | Runs | Notes |
 |---|---|---|
 | `claude-code` (default) | `claude -p`, a new session per call | The worker edits files and runs only the check you pass. |
-| `opencode` | `opencode run`, a new session per call | The worker may run any shell command in the folder. The judge can only read and run `git status`, `diff`, `log` and `show`. `--allow` is refused. |
+| `opencode` | `opencode run` (opencode 1.x), a new session per call | The worker may run any shell command in the folder. The judge can only read and run `git status`, `diff`, `log` and `show`. `--allow` is refused. |
+| `opencode2` | `opencode2 run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge is read-only as above and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
 
-Works with a recent Claude Code (last tried with 2.1.307) and opencode (last tried with 1.19.3).
+Works with a recent Claude Code (last tried with 2.1.307), opencode 1.x (1.19.3) and opencode 2 (2.1.4).
+opencode 2's installer puts an `opencode2` command next to `opencode`; the provider calls that one.
 Adding another provider is small: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How a run ends

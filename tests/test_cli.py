@@ -79,7 +79,7 @@ class CliTest(unittest.TestCase):
     def test_S1_size_budget(self):
         def count(f):
             return sum(1 for line in f.read_text().splitlines() if line.strip())
-        providers = ("claude_code.py", "opencode.py")       # a provider is not part of the loop core
+        providers = ("claude_code.py", "opencode.py", "opencode2.py")   # a provider is not part of the loop core
         core = sum(count(f) for f in CORE.glob("*.py") if f.name not in providers)
         self.assertLessEqual(core, 550, "the core must stay readable in one sitting")
         for name in providers:

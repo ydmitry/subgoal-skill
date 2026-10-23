@@ -52,6 +52,8 @@ class OpenCode:
                                                 timeout_s, stdin=prompt)
         if timed_out:
             raise ProviderError(f"no reply within {timeout_s:.0f}s; the call was stopped")
+        if code and "Unrecognized flag: --dir" in err:
+            raise ProviderError("this looks like opencode 2, which has no --dir: use --provider opencode2")
         return parse(code, out, err)
 
 
@@ -77,7 +79,8 @@ def parse(exit_code, stdout, stderr):
         elif event.get("type") == "error":
             error = event.get("error") if isinstance(event.get("error"), dict) else {}
             data = error.get("data") if isinstance(error.get("data"), dict) else {}
-            errors.append(str(data.get("message") or error.get("name") or event.get("error")))
+            errors.append(str(data.get("message") or error.get("message") or error.get("name")
+                              or event.get("error")))           # opencode 1 nests it in data, 2 does not
     reply = "\n".join(text).strip()
     if exit_code != 0 or errors or not reply:
         detail = "; ".join(errors) or (stderr.strip()[-2000:] if exit_code else "") or "no final text"

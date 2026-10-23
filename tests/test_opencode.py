@@ -11,7 +11,6 @@ The `opencode` these tests start is a fake: a Python script that records how it 
 import io
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +20,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from fake import gone
+from fake import fake_opencode, gone, opencode_match
 from subgoal.cli import main
 from subgoal.opencode import AGENT, READ_ONLY_RULES, WORKER_RULES, OpenCode, parse
 from subgoal.provider import ProviderError
@@ -29,35 +28,12 @@ from subgoal.provider import ProviderError
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
 OK, READ_ONLY, ERROR = ((FIXTURES / f"opencode_{name}.jsonl").read_text() for name in ("ok", "read_only", "error"))
-FAKE = """#!{python}
-import json, os, sys, time
-from pathlib import Path
-here = Path(__file__).parent
-calls = json.loads((here / "calls.json").read_text()) if (here / "calls.json").exists() else []
-calls.append({{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": sys.stdin.read(),
-               "config": os.environ.get("OPENCODE_CONFIG_CONTENT")}})
-(here / "calls.json").write_text(json.dumps(calls))
-reply = json.loads((here / "replies.json").read_text())[len(calls) - 1]
-os.chdir(sys.argv[sys.argv.index("--dir") + 1])
-for path, content in reply.get("write", {{}}).items():
-    Path(path).write_text(content)
-time.sleep(reply.get("sleep", 0))
-sys.stdout.write(reply.get("stdout", ""))
-sys.stderr.write(reply.get("stderr", ""))
-sys.exit(reply.get("exit", 0))
-"""
-
-
 def decide(permission, pattern, rules=READ_ONLY_RULES):
-    """opencode's own rule (docs: Permissions): the last rule that matches both wins. A
-    trailing " *" also matches nothing, so `git status *` covers plain `git status`."""
-    def match(text, glob):
-        tail = glob.endswith(" *")
-        regex = "".join({"*": ".*", "?": "."}.get(c) or re.escape(c) for c in (glob[:-2] if tail else glob))
-        return re.fullmatch(regex + ("( .*)?" if tail else ""), text, re.S)
+    """opencode's own rule (docs: Permissions): the last rule that matches both wins."""
     flat = [(key, pat, action) for key, value in rules.items()
             for pat, action in (value.items() if isinstance(value, dict) else [("*", value)])]
-    return [action for key, pat, action in flat if match(permission, key) and match(pattern, pat)][-1]
+    return [action for key, pat, action in flat
+            if opencode_match(permission, key) and opencode_match(pattern, pat)][-1]
 
 
 def step(text, tokens=110, cost=0):
@@ -79,11 +55,7 @@ class OpenCodeTest(unittest.TestCase):
         (self.dir / "app.txt").write_text("todo\n")
 
     def fake(self, replies):
-        """Put a fake opencode in self.bin that plays these replies, one per call."""
-        (self.bin / "replies.json").write_text(json.dumps(replies))
-        (self.bin / "opencode").write_text(FAKE.format(python=sys.executable))
-        (self.bin / "opencode").chmod(0o755)
-        return str(self.bin / "opencode")
+        return fake_opencode(self.bin, "opencode", replies)
 
     def calls(self):
         return json.loads((self.bin / "calls.json").read_text())
@@ -102,10 +74,10 @@ class OpenCodeTest(unittest.TestCase):
         (call,) = self.calls()
         self.assertEqual(call["argv"], ["run", "--format", "json", "--model", "mock/scripted", "--dir", str(self.dir)])
         self.assertEqual((call["stdin"], Path(call["cwd"]).resolve()), ("THE PROMPT", self.dir.resolve()))
-        self.assertEqual(json.loads(call["config"]), {"default_agent": AGENT, "agent": {AGENT: {
+        self.assertEqual(json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"]), {"default_agent": AGENT, "agent": {AGENT: {
             "mode": "primary", "permission": WORKER_RULES}}})
         self.assertEqual(WORKER_RULES, {"external_directory": "deny", "doom_loop": "deny"})   # never "ask"
-        self.assertEqual(provider.argv[:2], ["env", "OPENCODE_CONFIG_CONTENT=" + call["config"]])
+        self.assertEqual(provider.argv[:2], ["env", "OPENCODE_CONFIG_CONTENT=" + call["env"]["OPENCODE_CONFIG_CONTENT"]])
         self.assertNotIn("--model", OpenCode().argv)
         for unsafe in ("--continue", "--session", "--fork", "--auto", "--yolo", "dangerously", "Bash(make test)"):
             self.assertNotIn(unsafe, " ".join(provider.argv) + provider.describe())
@@ -118,7 +90,7 @@ class OpenCodeTest(unittest.TestCase):
         provider.run("THE PROMPT", self.dir, 60)
         (call,) = self.calls()
         self.assertEqual(call["argv"], ["run", "--format", "json", "--pure", "--dir", str(self.dir)])
-        self.assertEqual(json.loads(call["config"])["agent"][AGENT]["permission"], READ_ONLY_RULES)
+        self.assertEqual(json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], READ_ONLY_RULES)
         self.assertEqual(list(READ_ONLY_RULES)[0], "*")                     # deny all first, then allow
         for tool in ("edit", "write", "apply_patch", "task", "webfetch", "todowrite", "skill", "a_mcp_tool"):
             self.assertEqual(decide(tool, "app.txt"), "deny", tool)
@@ -168,6 +140,13 @@ class OpenCodeTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "no-such-opencode not found"):
             OpenCode(executable="no-such-opencode").run("hi", self.dir, 5)
 
+    def test_O5b_opencode_2_is_named(self):
+        said = "\nERROR\n  Unrecognized flag: --dir in command opencode run\n"     # opencode 2.1.4's words
+        provider = OpenCode(executable=self.fake([{"stdout": "DESCRIPTION\n  Run OpenCode with a message\n",
+                                                   "stderr": said, "exit": 1}]))
+        with self.assertRaisesRegex(ProviderError, "looks like opencode 2.*--provider opencode2"):
+            provider.run("hi", self.dir, 30)
+
     def test_O6_timeout_stops_the_child(self):
         provider = OpenCode(executable=self.fake([{"sleep": 30}]))
         start = time.monotonic()
@@ -196,8 +175,8 @@ class OpenCodeTest(unittest.TestCase):
         worker, judge = self.calls()
         self.assertTrue(judge["stdin"].startswith("You are a reviewer"))
         self.assertIn("--pure", judge["argv"])
-        self.assertEqual(json.loads(judge["config"])["agent"][AGENT]["permission"], READ_ONLY_RULES)
-        self.assertEqual(json.loads(worker["config"])["agent"][AGENT]["permission"], WORKER_RULES)
+        self.assertEqual(json.loads(judge["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], READ_ONLY_RULES)
+        self.assertEqual(json.loads(worker["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], WORKER_RULES)
         self.assertEqual((self.dir / "app.txt").read_text(), "done\n")
 
     def test_O9_cli_surface(self):
@@ -218,7 +197,7 @@ class OpenCodeTest(unittest.TestCase):
                              "--dry-run")[0], 0)
         self.assertEqual(list(self.dir.iterdir()), [self.dir / "app.txt"])
         shown = subprocess.run([sys.executable, "-m", "subgoal", "--help"], cwd=ROOT, capture_output=True, text=True)
-        self.assertIn("{claude-code,opencode}", shown.stdout)
+        self.assertRegex(shown.stdout, r"--provider \{claude-code,opencode[,}]")
 
 
 if __name__ == "__main__":

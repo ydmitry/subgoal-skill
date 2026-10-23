@@ -6,8 +6,9 @@ from .claude_code import ClaudeCode
 from .judge import judge_prompt
 from .loop import CHECK_TIMEOUT_S, Limits, build_prompt, run_check, run_loop, safe_workdir
 from .opencode import OpenCode
+from .opencode2 import OpenCode2
 
-PROVIDERS = {"claude-code": ClaudeCode, "opencode": OpenCode}     # another provider is one more entry
+PROVIDERS = {"claude-code": ClaudeCode, "opencode": OpenCode, "opencode2": OpenCode2}   # one entry each
 
 EPILOG = """exit codes: 0 goal_met | 1 out_of_iterations, out_of_time, out_of_tokens | 2 bad arguments
             3 provider_failed, protected_file_changed | 130 interrupted

@@ -1,5 +1,9 @@
-"""FakeProvider: plays scripted steps instead of calling an agent, and records what it got."""
+"""Fakes that record what they got. FakeProvider plays scripted steps instead of calling an
+agent; fake_opencode writes an opencode binary that plays scripted output."""
+import json
+import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -62,3 +66,40 @@ def gone(marker):
             return True
         time.sleep(0.02)
     return False
+
+
+FAKE_OPENCODE = """#!{python}
+import json, os, sys, time
+from pathlib import Path
+here = Path(__file__).parent
+calls = json.loads((here / "calls.json").read_text()) if (here / "calls.json").exists() else []
+env = {{k: v for k, v in os.environ.items() if k.startswith("OPENCODE_") or k == "PWD"}}
+calls.append({{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": sys.stdin.read(), "env": env}})
+(here / "calls.json").write_text(json.dumps(calls))
+reply = json.loads((here / "replies.json").read_text())[len(calls) - 1]
+if "--dir" in sys.argv:
+    os.chdir(sys.argv[sys.argv.index("--dir") + 1])
+for path, content in reply.get("write", {{}}).items():
+    Path(path).write_text(content)
+time.sleep(reply.get("sleep", 0))
+sys.stdout.write(reply.get("stdout", ""))
+sys.stderr.write(reply.get("stderr", ""))
+sys.exit(reply.get("exit", 0))
+"""
+
+
+def fake_opencode(folder, name, replies):
+    """Write folder/name, a fake opencode that plays these replies, one per call: stdout,
+    stderr, exit, sleep, and files to write in its folder. It records its calls in folder/calls.json."""
+    (folder / "replies.json").write_text(json.dumps(replies))
+    (folder / name).write_text(FAKE_OPENCODE.format(python=sys.executable))
+    (folder / name).chmod(0o755)
+    return str(folder / name)
+
+
+def opencode_match(text, glob):
+    """opencode's wildcard (docs: Permissions): * is any run of characters and ? is one, and a
+    trailing " *" also matches nothing, so `git status *` covers plain `git status`."""
+    tail = glob.endswith(" *")
+    regex = "".join({"*": ".*", "?": "."}.get(c) or re.escape(c) for c in (glob[:-2] if tail else glob))
+    return re.fullmatch(regex + ("( .*)?" if tail else ""), text, re.S) is not None
