@@ -5,8 +5,9 @@ from pathlib import Path
 from .claude_code import ClaudeCode
 from .judge import judge_prompt
 from .loop import CHECK_TIMEOUT_S, Limits, build_prompt, run_check, run_loop, safe_workdir
+from .opencode import OpenCode
 
-PROVIDERS = {"claude-code": ClaudeCode}     # a second provider is one more entry here
+PROVIDERS = {"claude-code": ClaudeCode, "opencode": OpenCode}     # another provider is one more entry
 
 EPILOG = """exit codes: 0 goal_met | 1 out_of_iterations, out_of_time, out_of_tokens | 2 bad arguments
             3 provider_failed, protected_file_changed | 130 interrupted
@@ -31,8 +32,8 @@ def parse_args(argv=None):
     p.add_argument("--protect", action="append", default=[], metavar="PATH",
                    help="a file or folder, relative to DIR, that must not change (repeatable)")
     p.add_argument("--allow", action="append", default=[], metavar="RULE",
-                   help="an extra Claude Code permission rule (repeatable)")
-    p.add_argument("--model", metavar="NAME", help="default: the tool's own default")
+                   help="an extra Claude Code permission rule (repeatable; claude-code only)")
+    p.add_argument("--model", metavar="NAME", help="default: the tool's own default (opencode: provider/model)")
     p.add_argument("--judge-model", metavar="NAME", help="model for the judge; default: --model")
     p.add_argument("--provider", choices=PROVIDERS, default="claude-code", help="default claude-code")
     p.add_argument("--dry-run", action="store_true",
@@ -42,6 +43,8 @@ def parse_args(argv=None):
         p.error("limits must be above 0: every run is bounded, and there is no 'unlimited'")
     if args.judge_model and args.check is not None:
         p.error("--judge-model is for the judge, which runs only when there is no --check")
+    if args.allow and args.provider != "claude-code":
+        p.error("--allow takes Claude Code rules; the opencode worker may already run any command in DIR")
     try:
         args.dir = safe_workdir(args.dir)
         args.goal = args.goal_file.read_text() if args.goal_file else args.goal
