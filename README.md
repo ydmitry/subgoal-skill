@@ -26,27 +26,21 @@ folder, the worker's own `notes.md`, and the last check output or judge verdict.
 
 ## Quick start
 
-Needs Python 3.10+ (macOS or Linux) and a coding agent, logged in: Claude Code (the default,
-last tried with 2.1.307) or [opencode](https://opencode.ai) (`--provider opencode`, tried with 1.19.3).
+You need Python 3.10+ and a coding agent that is logged in: Claude Code (the default) or
+[opencode](https://opencode.ai) with `--provider opencode`. There is nothing to install.
 
-**1. Clone and run the tests.** They make no model calls and take a few seconds.
+Try it on the fizzbuzz example. A run edits files, so it works on a throwaway copy:
 
 ```bash
 git clone https://github.com/ydmitry/subgoal-skill && cd subgoal-skill
-python3 -m unittest discover -s tests
-```
-
-**2. Dry run on a copy of the example.** It prints the exact `claude` command and the first
-prompt the worker will receive, and runs your check once to show where things stand. No agent is called.
-
-```bash
 mkdir -p /tmp/fizz && cp examples/fizzbuzz/* /tmp/fizz/
 python3 -m subgoal --dir /tmp/fizz --goal-file /tmp/fizz/GOAL.md \
-  --check "python3 -m unittest -q test_fizzbuzz" --protect test_fizzbuzz.py --dry-run
+  --check "python3 -m unittest -q test_fizzbuzz" --protect test_fizzbuzz.py
 ```
 
-**3. Run it for real.** Drop `--dry-run`; a small, fast model is plenty here (`--model NAME`).
-Each step prints one line, then comes the report. A real one from that example, shortened:
+The goal is "make the tests pass without editing the test file". After each step the loop
+runs your check, and exit 0 means done. A real run, shortened (a small, fast model is plenty:
+`--model NAME`):
 
 ```text
 subgoal: GOAL MET after step 1: the check exited 0
@@ -57,13 +51,15 @@ subgoal: GOAL MET after step 1: the check exited 0
   time      0m 18s of 30m 00s (checks included)
   tokens    174,667 (no limit set; as reported by the provider)
   cost      $0.01 (the provider's own estimate; a subscription is not billed per call)
-  worker's last words (unverified): "The goal is met: `python3 -m unittest -q test_fizzbuzz` runs 4 tests and reports OK. ..."
+  worker's last words (unverified): "The goal is met: ..."
   check output (tail):
     Ran 4 tests in 0.000s
 
     OK
   records   /private/tmp/fizz/.subgoal/20261021-150625/
 ```
+
+Add `--dry-run` first to see the exact command and the first prompt, with no agent called.
 
 Everything the run did is in that `records` folder: `run.json`, the worker's `notes.md`, and
 for each step the exact prompt, the reply, and the check output or the judge's reply.
@@ -124,7 +120,7 @@ the report at the end. The safety section applies unchanged.
 | `claude-code` (default) | `claude -p`, a new session per call | The worker edits files and runs only the check you pass. |
 | `opencode` | `opencode run`, a new session per call | The worker may run any shell command in the folder. The judge can only read and run `git status`, `diff`, `log` and `show`. `--allow` is refused. |
 
-Adding another one is small. The whole contract between the loop and an agent is
+Tried with Claude Code 2.1.307 and opencode 1.19.3. Adding another one is small. The whole contract between the loop and an agent is
 [`subgoal/provider.py`](subgoal/provider.py): a class with `describe()` and
 `run(prompt, workdir, timeout_s)` that starts a fresh session and returns a `Reply`. Register
 it in [`subgoal/cli.py`](subgoal/cli.py); the loop does not change. The opencode provider
@@ -158,8 +154,8 @@ A test caps the core's size so it stays readable in one sitting. Read in this or
 | [`subgoal/opencode.py`](subgoal/opencode.py) | The same for `opencode run`: permissions as one config, JSON events as a reply. |
 | [`subgoal/cli.py`](subgoal/cli.py) | The arguments, the provider registry, `--dry-run`. |
 
-The tests need no model: a `FakeProvider` plays scripted steps, and a fake `opencode` program
-plays the opencode side. One optional test starts the real opencode against a scripted local
+Run the tests with `python3 -m unittest discover -s tests`: they need no model. A `FakeProvider`
+plays scripted steps, and a fake `opencode` program plays the opencode side. One optional test starts the real opencode against a scripted local
 model (never a real one) to show the judge cannot write:
 `SUBGOAL_TEST_OPENCODE=/path/to/opencode python3 -m unittest tests/test_opencode_real.py`.
 An exercise, if you want one: stop when the check output repeats N times in a row.
