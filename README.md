@@ -95,10 +95,11 @@ The worker's own "I'm done" is printed in the report, but never trusted.
 
 ## Use it as a Claude Code skill
 
-The repo root holds a `SKILL.md`, so a clone in your skills folder is a skill:
+The repo root holds a `SKILL.md`, so a clone in your skills folder is a skill. Name the folder
+`subgoal`, like the skill (the Agent Skills format wants the two to match):
 
 ```bash
-git clone https://github.com/ydmitry/subgoal-skill ~/.claude/skills/subgoal-skill
+git clone https://github.com/ydmitry/subgoal-skill ~/.claude/skills/subgoal
 ```
 
 Claude Code then offers `/subgoal`: it turns your request into a goal with a check or done
