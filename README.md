@@ -3,6 +3,8 @@
 [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 
+A small example project by one person, not a product.
+
 **A coding-agent loop in a few hundred lines of plain Python.** Give it a goal; it calls a
 coding agent in a fresh session, checks the result, and repeats until the goal is met or a
 budget runs out. Standard library only: no packages to install.
@@ -10,6 +12,19 @@ budget runs out. Standard library only: no packages to install.
 It exists to show the moving parts between a bare `while :; do ...; done` and a full agent
 product: a finish line the agent does not get to grade itself, state kept on disk, a fresh
 context every call, hard limits, and an honest ending.
+
+**How it differs**
+
+- **Claude Code's built-in `/goal`** is Claude Code only, and its completion "is decided by a
+  fresh model rather than the one doing the work", one that "doesn't run commands or read files
+  independently". subgoal runs *your* command as the check, protects files, has hard limits,
+  writes every run's records to disk, and drives opencode as well.
+- **A bare bash loop** (Ralph) has no check, no budget, no stop reasons and no records.
+- **Who it is for:** people who want a bounded, unattended "make this check pass" loop with a
+  real check and a hard budget, and people who want to read a small loop to learn how one works.
+
+On names: the repo is `subgoal-skill`; the program and the skill are both called `subgoal`
+(`python3 -m subgoal`, `/subgoal`, the folder `~/.claude/skills/subgoal`).
 
 ```mermaid
 flowchart LR
@@ -59,6 +74,15 @@ subgoal: GOAL MET after step 1: the check exited 0
   records   /private/tmp/fizz/.subgoal/20261021-150625/
 ```
 
+The token figure counts everything the agent read, cached input included, and cached input is
+cheap: that is why a tiny task shows a big number next to a cost of one cent.
+
+**Why only one step?** The worker is told it may run your check itself, so on a small task it
+fixes things inside the step and passes on the first call. In the runs I tried on small tasks
+it was always one step. A second step happens when a step ends with the check still failing:
+the next fresh session then gets that check's output (the last 4,000 characters) and the
+worker's own notes.
+
 Add `--dry-run` first to see the exact command and the first prompt, with no agent called.
 
 Everything the run did is in that `records` folder: `run.json`, the worker's `notes.md`, and
@@ -78,6 +102,11 @@ for each step the exact prompt, the reply, and the check output or the judge's r
 The worker's own "I'm done" is printed in the report, but never trusted.
 
 ## ⚠️ Safety: read before the first real run
+
+How the worker edits unattended without `--dangerously-skip-permissions`: with the `claude-code`
+provider it runs in Claude Code's `acceptEdits` mode with permission prompts disabled, so it can
+edit files in the folder and run only the check command you pass. Anything else is denied rather
+than asked, so a run cannot hang waiting for an answer. The judge is read-only.
 
 - **It runs a coding agent unattended, as you.** The worker edits files in `--dir` and, with a
   check, may run that command too, so in effect it can run any code you can. Work on a
@@ -120,11 +149,8 @@ the report at the end. The safety section applies unchanged.
 | `claude-code` (default) | `claude -p`, a new session per call | The worker edits files and runs only the check you pass. |
 | `opencode` | `opencode run`, a new session per call | The worker may run any shell command in the folder. The judge can only read and run `git status`, `diff`, `log` and `show`. `--allow` is refused. |
 
-Tried with Claude Code 2.1.307 and opencode 1.19.3. Adding another one is small. The whole contract between the loop and an agent is
-[`subgoal/provider.py`](subgoal/provider.py): a class with `describe()` and
-`run(prompt, workdir, timeout_s)` that starts a fresh session and returns a `Reply`. Register
-it in [`subgoal/cli.py`](subgoal/cli.py); the loop does not change. The opencode provider
-([`subgoal/opencode.py`](subgoal/opencode.py)) is a good model to copy.
+Works with a recent Claude Code (last tried with 2.1.307) and opencode (last tried with 1.19.3).
+Adding another provider is small: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How a run ends
 
@@ -141,24 +167,10 @@ Every run ends with exactly one named stop reason and an exit code:
 | `interrupted` | You pressed Ctrl+C. | 130 |
 | (bad arguments) | Usage error. No run folder is created. | 2 |
 
-## Reading the code
+## Reading or changing the code
 
-A test caps the core's size so it stays readable in one sitting. Read in this order:
-
-| File | What is in it |
-|---|---|
-| [`subgoal/provider.py`](subgoal/provider.py) | The whole agent contract, about 30 lines. |
-| [`subgoal/loop.py`](subgoal/loop.py) | The loop itself: `run_loop()`, the prompt template, the limits, the report. |
-| [`subgoal/judge.py`](subgoal/judge.py) | The judge's prompt and the strict parse of its verdict line. |
-| [`subgoal/claude_code.py`](subgoal/claude_code.py) | The `claude -p` command line, its read-only variant, and its JSON reply. |
-| [`subgoal/opencode.py`](subgoal/opencode.py) | The same for `opencode run`: permissions as one config, JSON events as a reply. |
-| [`subgoal/cli.py`](subgoal/cli.py) | The arguments, the provider registry, `--dry-run`. |
-
-Run the tests with `python3 -m unittest discover -s tests`: they need no model. A `FakeProvider`
-plays scripted steps, and a fake `opencode` program plays the opencode side. One optional test starts the real opencode against a scripted local
-model (never a real one) to show the judge cannot write:
-`SUBGOAL_TEST_OPENCODE=/path/to/opencode python3 -m unittest tests/test_opencode_real.py`.
-An exercise, if you want one: stop when the check output repeats N times in a row.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md): the files in reading order, the tests, the size
+rule, and how to add a provider.
 
 ## Credits
 
@@ -172,10 +184,8 @@ An exercise, if you want one: stop when the check output repeats N times in a ro
   Bash loop". This project is what grows out of that loop.
 - Addy Osmani, [Plan-Act-Observe Loop](https://addyosmani.com/agentic-engineering/plan-act-observe/):
   "think about what to do, do it, check the result, repeat".
-- Claude Code docs: [/goal](https://code.claude.com/docs/en/goal), where completion "is decided
-  by a fresh model rather than the one doing the work" (if you just want this inside Claude
-  Code, use `/goal`); [headless mode](https://code.claude.com/docs/en/headless),
-  [permission modes](https://code.claude.com/docs/en/permission-modes), [permission rules](https://code.claude.com/docs/en/permissions).
+- Claude Code docs: [/goal](https://code.claude.com/docs/en/goal), [headless mode](https://code.claude.com/docs/en/headless),
+  [permission modes](https://code.claude.com/docs/en/permission-modes) and [permission rules](https://code.claude.com/docs/en/permissions).
 
 ## License
 
