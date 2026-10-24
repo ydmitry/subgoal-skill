@@ -265,13 +265,14 @@ def _budget(run, time_left):
 
 def _judge(run, judge, step, time_left):
     """Ask a fresh session with no edit tools if the goal is met. The worker's last words go in as
-    a claim. Records NN/judge-prompt.md, judge.md and judge-call.json; raises ProviderError like any call."""
+    a claim. Records NN/judge-prompt.md, judge.md and judge-call.json (not its own tool calls);
+    raises ProviderError like any call."""
     prompt, began = judge_prompt(run.goal, run.dir, run.last_words, run.folder), time.monotonic()
     (step / "judge-prompt.md").write_text(prompt)
     run.judge_calls += 1
     reply = judge.run(prompt, run.dir, time_left())
     (step / "judge.md").write_text(reply.text + "\n")
-    write_json(step / "judge-call.json", dict(asdict(reply), text="(judge.md)",
+    write_json(step / "judge-call.json", dict(asdict(reply), text="(judge.md)", trace=None,
                                               seconds=round(time.monotonic() - began)))
     run.tokens, run.cost_usd = add(run.tokens, reply.tokens), add(run.cost_usd, reply.cost_usd)
     return parse_verdict(reply.text, run.steps)

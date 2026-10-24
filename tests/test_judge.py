@@ -221,7 +221,7 @@ class JudgeLoopTest(unittest.TestCase):
         def reads(workdir):
             records = sorted((workdir / ".subgoal").iterdir())[-1]
             seen.append({p.parent.name: p.read_text() for p in records.glob("*/trace.md")})
-            return Reply("Reasons.\nVERDICT: not met")
+            return Reply("Reasons.\nVERDICT: not met", trace="Bash ls -la\nRead x2")
         seen = []
         run = self.go([lambda workdir: Reply("I listed.", trace="Bash ls"), forge], [reads, reads],
                       limits=Limits(max_iterations=2))
@@ -229,6 +229,8 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertEqual(seen, [{"01": "Bash ls\n"}, {"01": "Bash ls\n"}])
         self.assertEqual((run.folder / "01" / "trace.md").read_text(), "Bash ls\n")
         self.assertFalse((run.folder / "02" / "trace.md").exists())
+        for n in ("01", "02"):                               # the judge's own tool calls are not kept
+            self.assertIsNone(json.loads((run.folder / n / "judge-call.json").read_text())["trace"])
 
     def test_J11_parts_no_file_or_command_can_show(self):
         blind = say("The text matches the code.\nVERDICT: not met, cannot see: the page in a browser")
