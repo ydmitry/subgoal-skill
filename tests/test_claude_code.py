@@ -129,6 +129,13 @@ class ClaudeCodeTest(unittest.TestCase):
         self.assertEqual(len(head.splitlines()) + left_out + len(tail.splitlines()), 300)
         self.assertGreater(len(head), TRACE_CAP // 2 - 50)
         self.assertGreater(len(tail), TRACE_CAP // 2 - 50)
+        for long in ([("Write", {"file_path": "/" + "p" * 9000})], [("Task", {"description": "d" * 3000})] * 2,
+                     [("T" * 9000, {})]):                         # one long argument or name cannot fill it
+            trace = tool_trace(tool_calls(*long)).splitlines()
+            self.assertEqual(len(trace), len(long))                 # whole, nothing left out
+            self.assertTrue(all(len(line) <= 201 for line in trace))
+        many = tool_trace(tool_calls(*[("Write", {"file_path": f"/{i:04d}" + "p" * 9000}) for i in range(100)]))
+        self.assertRegex(many, r"\n\.\.\. [1-9]\d* lines left out \.\.\.\n")
 
     def test_C3_parse_error_result(self):
         with self.assertRaisesRegex(ProviderError, r"exit 1\): Reached maximum budget \(\$0.0001\)"):

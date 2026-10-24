@@ -78,8 +78,9 @@ def parse(exit_code, stdout, stderr):
 
 
 def tool_trace(events):
-    """One line per tool call, in order: the tool and its key argument, never what it returned.
-    A run of Read, Grep and Glob calls is one `Read xN` line. Past TRACE_CAP characters, the middle goes."""
+    """One line per tool call, in order: the tool and its key argument, each cut at 100 characters,
+    never what it returned. A run of Read, Grep and Glob calls is one `Read xN` line. Past
+    TRACE_CAP characters, the middle goes."""
     lines = []
     for event in events:
         message = event.get("message") if event.get("type") == "assistant" else None
@@ -87,13 +88,13 @@ def tool_trace(events):
         for call in content if isinstance(content, list) else []:
             if not isinstance(call, dict) or call.get("type") != "tool_use":
                 continue
-            name, args = str(call.get("name")), call.get("input")
+            name, args = str(call.get("name"))[:100], call.get("input")
             arg = " ".join(str(args.get(TRACE_ARGS.get(name), "")).split()) if isinstance(args, dict) else ""
             if name in READS:
                 reads = int(lines.pop()[6:]) if lines and lines[-1].startswith("Read x") else 0
                 lines.append(f"Read x{reads + 1}")
             else:
-                lines.append(f"{name} {arg[:100] if name == 'Bash' else arg}".rstrip())
+                lines.append(f"{name} {arg[:100]}".rstrip())
     text, half = "\n".join(lines), TRACE_CAP // 2
     if len(text) <= TRACE_CAP:
         return text
