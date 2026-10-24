@@ -75,7 +75,9 @@ class JudgeLoopTest(unittest.TestCase):
                 self.setUp()
                 run = self.go([say()], [say(reply)], limits=Limits(max_iterations=1))
                 self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=1, judge=1)
-                self.assertEqual(run.last_verdict, Verdict(False, NO_VERDICT, 1))
+                self.assertFalse(run.last_verdict.met)
+                self.assertEqual(run.last_verdict.reasons,                     # the judge's text is kept
+                                 f"{reply}\n[{NO_VERDICT} on its last line]" if reply else NO_VERDICT)
                 self.assertIn("the judge gave no verdict", self.printed)
                 self.assertIn("GOAL NOT MET", self.printed)
 
@@ -85,6 +87,13 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertFalse(parse_verdict("VERDICT: met\nVERDICT: not met", 1).met)    # only the last line counts
         self.assertTrue(parse_verdict("VERDICT: not met\nVERDICT: met", 1).met)
         self.assertEqual(parse_verdict("", 1).reasons, NO_VERDICT)
+        first = parse_verdict("VERDICT: not met\nSection 2 is missing.\nTo reach met: add it.", 4)
+        self.assertEqual((first.met, first.step), (False, 4))                 # a verdict on the first line
+        self.assertIn("Section 2 is missing.\nTo reach met: add it.\n[" + NO_VERDICT, first.reasons)
+        self.assertFalse(parse_verdict("Part 1 holds.\nVERDICT: met\nPart 2 is missing.", 1).met)
+        long = parse_verdict("x" * 5000 + "\nthe end", 1).reasons
+        self.assertTrue(long.endswith("x\nthe end\n[" + NO_VERDICT + " on its last line]"))   # the note survives
+        self.assertLess(len(long), 4100)
         blind = parse_verdict("The text holds.\nVERDICT: not met, cannot see: a run, a browser\n", 3)
         self.assertEqual(blind, Verdict(False, "The text holds.", 3, "a run, a browser"))   # the third line
         self.assertEqual(str(blind), "not met (cannot see)")

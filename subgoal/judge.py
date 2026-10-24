@@ -47,7 +47,7 @@ Your last line must be exactly one of these lines, with nothing after it:
 @dataclass(frozen=True)
 class Verdict:
     met: bool
-    reasons: str     # what the judge said before its verdict line, or why there is no verdict
+    reasons: str     # what the judge said before its verdict line; with none, its reply and a note
     step: int        # the worker step it judged
     unseen: str | None = None    # not met: the parts of the goal the judge says no file can show
 
@@ -63,12 +63,13 @@ def judge_prompt(goal, workdir, claim):
 
 def parse_verdict(text, step):
     """Read the verdict from the last non-empty line, and from nowhere else.
-    A reply with no such line is NOT met: silence never counts as success. The third line is not
-    met too; it also keeps the parts the judge named (nothing named: a plain not met)."""
+    A reply with no such line is NOT met, whatever it says: silence never counts as success.
+    Its text is kept (the end of it, if long) with a note that the verdict line is missing.
+    The third line is not met too; it keeps the parts the judge named (none named: plain not met)."""
     lines = text.strip().splitlines()
     last = lines[-1].strip() if lines else ""
     unseen = last[len(CANNOT_SEE):].strip()[:300] if last.startswith(CANNOT_SEE) else None
     if last not in (MET, NOT_MET) and unseen is None:
-        return Verdict(False, NO_VERDICT, step)
+        return Verdict(False, f"{text.strip()[-CAP:]}\n[{NO_VERDICT} on its last line]" if lines else NO_VERDICT, step)
     reasons = "\n".join(lines[:-1]).strip() or "(the judge gave no reasons)"
     return Verdict(last == MET, reasons[-CAP:], step, unseen or None)
