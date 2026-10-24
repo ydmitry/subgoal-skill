@@ -15,7 +15,7 @@ TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens",
 JUDGE_TOOLS = ("Read", "Grep", "Glob", "Bash")
 # The trace: each tool call's key argument, by tool (others: the name alone). Reads fold into one line.
 TRACE_ARGS = {"Skill": "skill", "Task": "description", "Agent": "description", "Write": "file_path",
-              "Edit": "file_path", "Bash": "command"}
+              "Edit": "file_path", "Read": "file_path", "Bash": "command"}
 READS, TRACE_CAP = ("Read", "Grep", "Glob"), 4_000
 
 
@@ -81,8 +81,9 @@ def parse(exit_code, stdout, stderr):
 
 def tool_trace(events):
     """One line per tool call, in order: the tool and its key argument, each cut at 100 characters
-    (a file path keeps its end, so its file name shows), never what it returned. A run of Read, Grep and Glob calls is one `Read xN` line. Past
-    TRACE_CAP characters, the middle goes."""
+    (a file path keeps its end, so its file name shows), never what it returned. A run of Read, Grep
+    and Glob calls is one line naming the files read, `Read: a.md, b.md`. Past TRACE_CAP characters,
+    the middle goes."""
     lines = []
     for event in events:
         message = event.get("message") if event.get("type") == "assistant" else None
@@ -93,8 +94,8 @@ def tool_trace(events):
             name, args = str(call.get("name"))[:100], call.get("input")
             arg = " ".join(str(args.get(TRACE_ARGS.get(name), "")).split()) if isinstance(args, dict) else ""
             if name in READS:
-                reads = int(lines.pop()[6:]) if lines and lines[-1].startswith("Read x") else 0
-                lines.append(f"Read x{reads + 1}")
+                seen = lines.pop()[6:] if lines and lines[-1].startswith("Read:") else ""
+                lines.append(("Read: " + ", ".join(filter(None, [seen, arg.rsplit("/", 1)[-1] if name == "Read" else ""])))[:200].rstrip())
             else:
                 lines.append(f"{name} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:100]}".rstrip())
     text, half = "\n".join(lines), TRACE_CAP // 2

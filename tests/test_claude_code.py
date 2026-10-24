@@ -90,7 +90,7 @@ class ClaudeCodeTest(unittest.TestCase):
         self.assertEqual((reply.text, reply.session), ("done", None))  # the fixture has no session id: unknown
         self.assertEqual(reply.tokens, 10 + 819 + 21757 + 142464)    # input, output, cache writes, reads
         self.assertAlmostEqual(reply.cost_usd, 0.00618654)
-        self.assertEqual(reply.trace, "Read x2\nSkill tiny\nBash ls\nWrite /tmp/hello.txt\nBash cat hello.txt")
+        self.assertEqual(reply.trace, "Read: a.txt, b.txt\nSkill tiny\nBash ls\nWrite /tmp/hello.txt\nBash cat hello.txt")
         for leaked in ("alpha", "beta", "Before writing any file", "File created", "hi\n"):
             self.assertNotIn(leaked, reply.trace)                      # results and contents stay out
         with_id = OK.replace('"type": "result"', f'"{claude_code.RESUME_ID_KEY}": "abc-123", "type": "result"')
@@ -112,12 +112,17 @@ class ClaudeCodeTest(unittest.TestCase):
                             ("WebFetch", {"url": "https://example.com"}), ("Read", {}), ("Grep", {}))
         events.insert(1, {"type": "system", "subtype": "init"})          # other events count for nothing
         self.assertEqual(tool_trace(events).splitlines(), [
-            "Skill tiny", "Read x3", "Task look around", "Agent review it", "Read x1", "Edit /a", "Write /b",
-            "Bash echo one " + "x" * 91, "WebFetch", "Read x2"])
+            "Skill tiny", "Read: a", "Task look around", "Agent review it", "Read: b", "Edit /a", "Write /b",
+            "Bash echo one " + "x" * 91, "WebFetch", "Read:"])           # a run of reads names its files; Grep and Glob add none
         deep = "/" + "d/" * 80 + "PLAN.md"                              # a path cut from the front would lose its file name
         trace = tool_trace(tool_calls(("Write", {"file_path": deep}), ("Bash", {"command": "ls " + "z" * 300}))).splitlines()
         self.assertEqual((trace[0], len(trace[1])), ("Write " + deep[-100:], 105))
         self.assertTrue(trace[0].endswith("/PLAN.md"))
+        reads = tool_calls(("Read", {"file_path": "/s/references/planning.md"}), ("Grep", {"pattern": "p"}),
+                           ("Read", {"file_path": "/s/references/delivery-gates.md"}), ("Bash", {"command": "ls"}),
+                           ("Read", {"file_path": "/w/app.py"}))
+        self.assertEqual(tool_trace(reads).splitlines(), ["Read: planning.md, delivery-gates.md", "Bash ls", "Read: app.py"])
+        self.assertLessEqual(len(tool_trace(tool_calls(*[("Read", {"file_path": f"/p/file{i}.md"}) for i in range(99)]))), 200)
         self.assertEqual(tool_trace([]), "")
         self.assertEqual(parse(0, OK.replace('"tool_use"', '"no_tool"'), "").trace, "")   # no calls: empty, not None
 
@@ -167,7 +172,7 @@ class ClaudeCodeTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "exit 1\): cut off"):  # stderr still comes first
             parse(1, no_result, "cut off")
         reply = parse(0, "not JSON\n[1, 2]\n" + OK + "garbage {\n", "")          # stray lines are skipped
-        self.assertEqual((reply.text, reply.trace.splitlines()[0]), ("done", "Read x2"))
+        self.assertEqual((reply.text, reply.trace.splitlines()[0]), ("done", "Read: a.txt, b.txt"))
 
     def test_C5_executable_not_found(self):
         with self.assertRaisesRegex(ProviderError, "not found"):

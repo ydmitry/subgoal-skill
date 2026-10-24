@@ -106,7 +106,7 @@ for each step the exact prompt, the reply, the check output or the judge's reply
 - **A goal that names a skill** ("use the tiny skill to create hello.txt"), with no `--check`, is
   judged on how the work was done, not only on the result. After each step the loop writes the worker's tool calls
   to `NN/trace.md` in the records, one line per call, in order (`Skill tiny`, `Bash ls`,
-  `Write /path/hello.txt`, a run of reads as `Read x3`), never what a call returned. The worker
+  `Write /path/hello.txt`, a run of reads as one line naming the files, `Read: planning.md, gates.md`), never what a call returned. The worker
   could edit those files, so after every step the loop writes them all back from its own copy. The judge
   reads the skill's `SKILL.md` and that trace: a skill that was never invoked, or a step it
   requires that the trace does not show, is not met. The trace comes from `claude-code` only for
