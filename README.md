@@ -101,8 +101,9 @@ for each step the exact prompt, the reply, and the check output or the judge's r
   neither can show are left (a page in a browser, a timing), it ends with
   `VERDICT: not met, cannot see: ...`. In this mode the worker may run any command in the folder too.
   Try it on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
-- **`--protect PATH`** names files the worker must not touch, such as the tests. If one
-  changes, the run stops before anything is checked.
+- **`--protect PATH`** names files the worker and the judge must not touch, such as the tests.
+  If the worker changes one, the run stops before anything is checked; if a command the judge
+  runs changes one, the run stops and its verdict does not count.
 
 The worker's own "I'm done" is printed in the report, but never trusted.
 
@@ -124,8 +125,8 @@ has no edit tools and may run shell commands in the folder.
 - **Every step spends your Claude subscription usage or API budget.** The limits bound the
   spend; they do not remove it.
 - **The judge has no edit tool, but a command it runs can still change files.** It is told to
-  leave the work as it is (run the tests, not fix them), and the loop does not check that it
-  did, so run on a clean git tree or a branch. Its "met" is a model's opinion and can be wrong.
+  leave the work as it is (run the tests, not fix them), and the loop checks only the
+  `--protect` paths after it, so run on a clean git tree or a branch. Its "met" is a model's opinion and can be wrong.
   A check command is still the strongest finish line, and the only one a model cannot talk its
   way past. A browser or a timing is out of the judge's reach: use a `--check` that drives one.
   "Goal met" proves what the check tests, nothing more. Read the diff.
@@ -182,7 +183,7 @@ Every run ends with exactly one named stop reason and an exit code:
 | `out_of_time` | The wall-clock limit was reached (default 30 minutes). | 1 |
 | `out_of_tokens` | The `--max-tokens` limit was reached. | 1 |
 | `provider_failed` | The agent tool was missing, failed, or returned unreadable output. | 3 |
-| `protected_file_changed` | The worker changed a `--protect` path. Nothing is checked. | 3 |
+| `protected_file_changed` | The worker changed a `--protect` path (nothing is checked), or a command the judge ran did (its verdict does not count). | 3 |
 | `interrupted` | You pressed Ctrl+C. | 130 |
 | (bad arguments) | Usage error. No run folder is created. | 2 |
 

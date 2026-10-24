@@ -211,9 +211,7 @@ def _steps(run, provider, judge, guarded, time_left):
         write_json(step / "call.json", dict(asdict(reply), text="(reply.md)", seconds=round(worker_s)))
         run.last_words = reply.text
         run.tokens, run.cost_usd = add(run.tokens, reply.tokens), add(run.cost_usd, reply.cost_usd)
-        changed = [p for p, digest in fingerprint(run.dir, run.protect).items() if digest != guarded[p]]
-        if changed:                                                 # e: the finish line was moved
-            run.error = "the worker changed protected paths: " + ", ".join(changed)
+        if _moved(run, guarded, "worker"):                          # e: the finish line was moved
             return StopReason.PROTECTED_FILE_CHANGED
         if judge is None:
             run.last_check = _check(run, i)                         # f: the loop checks, not the agent
@@ -227,6 +225,8 @@ def _steps(run, provider, judge, guarded, time_left):
             except ProviderError as error:
                 run.error = f"the judge failed: {error}"
                 return StopReason.OUT_OF_TIME if time_left() <= 0 else StopReason.PROVIDER_FAILED
+            if _moved(run, guarded, "judge"):                       # a command it ran moved it
+                return StopReason.PROTECTED_FILE_CHANGED            # before its verdict counts
             met, said = run.last_verdict.met, f"judge: {run.last_verdict}"
         print(f"step {i}/{run.limits.max_iterations}  worker {mmss(worker_s)}  "
               f"{count(reply.tokens)} tokens  {said}", file=sys.stderr)
@@ -236,6 +236,14 @@ def _steps(run, provider, judge, guarded, time_left):
         if stop := _budget(run, time_left):                         # h
             return stop
     return StopReason.OUT_OF_ITERATIONS
+
+
+def _moved(run, guarded, who):
+    """True, with run.error set, if a --protect path changed since the run started."""
+    changed = [p for p, digest in fingerprint(run.dir, run.protect).items() if digest != guarded[p]]
+    if changed:
+        run.error = f"the {who} changed protected paths: " + ", ".join(changed)
+    return bool(changed)
 
 
 def _budget(run, time_left):

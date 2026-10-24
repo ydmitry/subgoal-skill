@@ -6,7 +6,7 @@
     out_of_time              J7 (no judge call once the worker used the time)
     out_of_tokens            J7 (no judge call once the worker used the tokens)
     provider_failed          J4 (the judge failed)
-    protected_file_changed   J5 (the judge is never asked)
+    protected_file_changed   J5 (the judge is never asked), J5b (the judge changed one)
 """
 import io
 import json
@@ -116,6 +116,18 @@ class JudgeLoopTest(unittest.TestCase):
         run = self.go([edit("test_app.py", "moved\n")], [], protect=["test_app.py"])
         self.ended(run, R.PROTECTED_FILE_CHANGED, 3, worker=1, judge=0)
         self.assertFalse((run.folder / "01" / "judge-prompt.md").exists())
+
+    def test_J5b_a_judge_that_changes_a_protected_path_ends_the_run(self):
+        for verdict in ("met", "not met"):
+            with self.subTest(verdict=verdict):
+                self.setUp()
+                (self.dir / "test_app.py").write_text("the finish line\n")
+                run = self.go([edit("app.py", "done\n"), say()],
+                              [edit("test_app.py", "snapshot\n", text=f"Ran it.\nVERDICT: {verdict}")],
+                              protect=["test_app.py"])
+                self.ended(run, R.PROTECTED_FILE_CHANGED, 3, worker=1, judge=1)   # its "met" never counts
+                self.assertEqual(run.error, "the judge changed protected paths: test_app.py")  # not the worker
+                self.assertIn("GOAL NOT MET (protected_file_changed)", self.printed)
 
     def test_J6_totals_and_report(self):
         run = self.go([edit("app.py", "done\n", tokens=100)], [lambda workdir: Reply("fine\nVERDICT: met", 40, 0.5)])

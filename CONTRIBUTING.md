@@ -56,7 +56,8 @@ A provider is a class that satisfies [`subgoal/provider.py`](subgoal/provider.py
 - Its constructor takes `model`, `allow` and `edit=True`. With `edit=False`, no session it
   starts has an edit, write or patch tool, whatever `allow` says, but it may run shell commands
   in the folder; the judge is built this way. Nothing stops such a command from writing a file:
-  the judge's prompt asks it to leave the work as it is.
+  the judge's prompt asks it to leave the work as it is, and the loop checks the `--protect`
+  paths after it.
 - `describe()` returns one line: the tool, model and permissions every call will use.
 - `run(prompt, workdir, timeout_s)` starts a **new** session in `workdir`, never resumes an
   old one, enforces the timeout, and returns a `Reply`. Anything unusable raises

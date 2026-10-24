@@ -50,8 +50,8 @@ Records are in `<dir>/.subgoal/<run-id>/`: `report.md`, `run.json`, `notes.md`, 
 
 The loop runs a coding agent unattended, as the user, unsandboxed, in `--dir`: it edits files and
 runs the check, or, with no check, any command. The judge runs commands too: it has no edit tool,
-but a command can still change files and the loop does not check that. Hooks and MCP servers there
-run too. Use a clean git tree or a branch, and read the diff.
+but a command can still change files, and the loop checks only `--protect` paths. Hooks and MCP
+servers there run too. Use a clean git tree or a branch, and read the diff.
 
 ## Do not
 
