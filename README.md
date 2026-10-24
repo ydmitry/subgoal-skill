@@ -97,8 +97,9 @@ for each step the exact prompt, the reply, and the check output or the judge's r
   reads the files against your goal, may run commands in the folder (your tests, a script,
   `node` or `python`) to check a part, and ends its reply with `VERDICT: met` or
   `VERDICT: not met` (anything else is not met). Its "met" is a model's opinion, and the report
-  says so. It has no browser tool: when everything files and commands can show holds and only
-  parts neither can show are left (a page in a browser, a timing), it ends with
+  says so. It has no browser tool, but it tries Playwright or a headless Chrome from the shell for a web page.
+  When everything files and commands can show holds and only parts neither can show are left (no
+  browser installed, a timing), it ends with
   `VERDICT: not met, cannot see: ...`. In this mode the worker may run any command in the folder too.
   Try it on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
 - **`--protect PATH`** names files the worker and the judge must not touch, such as the tests.
@@ -130,8 +131,8 @@ judge has no edit tools and may run shell commands in the folder.
   leave the work as it is (run the tests, not fix them), and the loop checks only the
   `--protect` paths after it, so run on a clean git tree or a branch. Its "met" is a model's opinion and can be wrong.
   A check command is still the strongest finish line, and the only one a model cannot talk its
-  way past. A browser view or a timing that no command in the project shows is out of the
-  judge's reach: use a `--check` that drives one.
+  way past. A page needs a browser installed on the machine (the judge tries Playwright or Chrome); a timing
+  that no command in the project shows is out of the judge's reach: use a `--check` for those.
   "Goal met" proves what the check tests, nothing more. Read the diff.
 
 ## Use it as a Claude Code skill
@@ -155,10 +156,9 @@ the report at the end. The safety section applies unchanged.
   compound check (`make test && make lint`) in a script, and `--protect` the script.
 - **Without a check, write done criteria the judge can tick off from the files or from a
   command it runs:** numbered and observable ("README.md has three sections, in this order",
-  "`npm test` passes"), never "good docs", and never "the page opens in a browser without
-  errors": the judge has no browser tool, so unless a command in the project shows that, it
-  needs a check that drives a browser. If the judge's last review names such parts, the
-  report lists them. See
+  "`npm test` passes"), never "good docs". "The page opens in a browser without errors" works if a headless browser is
+  installed (the judge tries Playwright or Chrome); without one it needs a check that drives a
+  browser. If the judge's last review names parts it could not show, the report lists them. See
   [`examples/write-the-docs/GOAL.md`](examples/write-the-docs/GOAL.md).
 - **Protect the finish line.** `--protect` the tests, the check script, anything that must not change.
 - **Stuck in a loop?** Add a sign: one line in the goal that says what not to do.
