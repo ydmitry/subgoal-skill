@@ -18,13 +18,12 @@ WORKER = [("write", {"filePath": "{outside}/escaped.txt", "content": "out\n"}),
           ("read", {"filePath": "app.txt"}),
           ("write", {"filePath": "app.txt", "content": "done\n"}),
           "I made app.txt say done."]
-# The judge tries every way to write it can name, then reads, which must still work.
+# The judge tries each edit tool (none is offered), then runs a check of its own, reads, and
+# looks at git, which must all work.
 JUDGE = [("write", {"filePath": "app.txt", "content": "judged\n"}),
          ("edit", {"filePath": "app.txt", "oldString": "done", "newString": "judged"}),
          ("apply_patch", {"patchText": "*** Begin Patch\n*** Add File: judge.txt\n+judged\n*** End Patch"}),
-         ("bash", {"command": "git status > app.txt", "description": "Write with a redirect"}),
-         ("bash", {"command": "git diff --output=app.txt", "description": "Write with git"}),
-         ("bash", {"command": "git status && touch judge.txt", "description": "Make a file"}),
+         ("bash", {"command": "grep -q done app.txt && echo passed", "description": "Run a check"}),
          ("read", {"filePath": "app.txt"}),
          ("bash", {"command": "git status --short", "description": "See what changed"}),
          "app.txt says done.\nVERDICT: met"]
@@ -58,8 +57,8 @@ class RealOpenCodeTest(opencode_mock.RealOpenCodeCase):
         self.assertTrue(call["session"].startswith("ses_"))
         self.assertEqual((step / "reply.md").read_text(), "I made app.txt say done.\n")
 
-    def test_R2_the_judge_cannot_write(self):
-        code, out = self.subgoal()                               # no --check: a read-only judge decides
+    def test_R2_the_judge_has_no_edit_tools_but_runs_commands(self):
+        code, out = self.subgoal()                               # no --check: a judge decides
         self.assertEqual(code, 0, out)
         self.assertIn("GOAL MET after step 1: a judge said met", out)
         self.assertEqual((self.project / "app.txt").read_text(), "done\n")    # the worker's edit, no more
@@ -69,10 +68,9 @@ class RealOpenCodeTest(opencode_mock.RealOpenCodeCase):
         self.assertEqual(len(said), len(JUDGE) - 1)
         for text in said[:3]:                                    # write, edit, apply_patch: not offered
             self.assertIn("unavailable tool", text)
-        for text in said[3:6]:                                   # the redirect, --output, touch
-            self.assertIn("prevents you from using this specific tool call", text)
-        self.assertIn("1: done", said[6])                       # reading still works
-        self.assertNotIn("prevents you", said[7])               # and so does git status
+        self.assertIn("passed", said[3])                        # a command of its own runs
+        self.assertIn("1: done", said[4])                       # reading works
+        self.assertNotIn("prevents you", said[5])               # and so does git status
         step = next(self.project.glob(".subgoal/*/01"))
         self.assertTrue((step / "judge.md").read_text().endswith("VERDICT: met\n"))
 

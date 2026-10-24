@@ -25,11 +25,10 @@ def rule(action, resource, effect):
 # code that an allowed command runs, such as the tests, can still write anywhere.)
 LEAVE = ("* /*", "*>/*", "*=/*", "*'/*", '*"/*', "*../*", "* ~*")
 WORKER_RULES = [rule("external_directory", "*", "deny"), *(rule("shell", path, "deny") for path in LEAVE)]
-# What a read-only session may use: look at files, and look at git. The last matching rule wins,
-# so the denials for a redirect and for `git diff --output=FILE` (both write a file) come last.
-READ_ONLY_RULES = [rule("*", "*", "deny"), *(rule(action, "*", "allow") for action in ("read", "glob", "grep")),
-                   *(rule("shell", f"git {command} *", "allow") for command in ("status", "diff", "log", "show")),
-                   rule("shell", "*>*", "deny"), rule("shell", "*--output*", "deny")]
+# What the judge (edit=False) may use: read files, and run shell commands under the worker's path
+# rule. Everything else is denied, edit (which covers write and patch) included.
+JUDGE_RULES = [rule("*", "*", "deny"),
+               *(rule(action, "*", "allow") for action in ("read", "glob", "grep", "shell")), *WORKER_RULES]
 
 
 class OpenCode2:
@@ -44,13 +43,13 @@ class OpenCode2:
         # --agent                  an agent that is missing stops the call (a missing default would
         #                          fall back to another agent)
         # no project config        (edit=False) no opencode config or plugins from DIR: plugin code
-        #                          could write
+        #                          would run unasked in the judge's session
         # allow                    Claude Code rules, unused, as for opencode 1
         # executable               default: opencode2 (the installer's name) if on PATH, else opencode
         executable = executable or ("opencode2" if shutil.which("opencode2") else "opencode")
         self.edit, self.executable, self.version = edit, executable, None
         config = {"agents": {AGENT: {"mode": "primary",
-                                     "permissions": WORKER_RULES if edit else READ_ONLY_RULES}}}
+                                     "permissions": WORKER_RULES if edit else JUDGE_RULES}}}
         self.argv = ["env", "-u", "PWD", *([] if edit else ["OPENCODE_DISABLE_PROJECT_CONFIG=1"]),
                      "OPENCODE_CONFIG_CONTENT=" + json.dumps(config, separators=(",", ":")),
                      executable, "run", "--standalone", "--format", "json", "--agent", AGENT]
@@ -59,7 +58,7 @@ class OpenCode2:
 
     def describe(self):
         model = "" if "--model" in self.argv else ", your default model"
-        only = ", read-only: edits are denied" if not self.edit else ""
+        only = ", no edit tools: it may run commands" if not self.edit else ""
         return f"{shlex.join(self.argv)}  (run in DIR, prompt on stdin{model}{only})"
 
     def run(self, prompt, workdir, timeout_s):

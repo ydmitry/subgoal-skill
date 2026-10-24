@@ -12,7 +12,7 @@ Read in this order:
 | [`subgoal/provider.py`](subgoal/provider.py) | The whole contract between the loop and an agent, about 30 lines. |
 | [`subgoal/loop.py`](subgoal/loop.py) | The loop itself: `run_loop()`, the prompt template, the limits, the stop reasons, the report. |
 | [`subgoal/judge.py`](subgoal/judge.py) | The judge's prompt and the strict parse of its verdict line. |
-| [`subgoal/claude_code.py`](subgoal/claude_code.py) | The `claude -p` command line, its read-only variant, and how its JSON becomes a `Reply`. |
+| [`subgoal/claude_code.py`](subgoal/claude_code.py) | The `claude -p` command line, its judge variant (no edit tools), and how its JSON becomes a `Reply`. |
 | [`subgoal/opencode.py`](subgoal/opencode.py) | The same for `opencode run` (opencode 1): permissions as one config, JSON events as a `Reply`. |
 | [`subgoal/opencode2.py`](subgoal/opencode2.py) | opencode 2: another command line and rule format, the same events (it reuses `opencode.parse`). |
 | [`subgoal/cli.py`](subgoal/cli.py) | The arguments, the `PROVIDERS` registry, `--dry-run`. |
@@ -32,7 +32,8 @@ from [`tests/fixtures`](tests/fixtures), and the opencode tests start a fake `op
 program: a small script that records how it was called and plays back those outputs.
 
 Two optional test files, one per opencode major version, run the real opencode binary against a scripted local model, never a real
-one, to show that the worker edits inside the folder only and that the judge cannot write:
+one, to show that the worker edits inside the folder only and that the judge is offered no edit
+tool yet can run a command:
 
 ```bash
 SUBGOAL_TEST_OPENCODE=/path/to/opencode1 python3 -m unittest discover -s tests -p test_opencode_real.py
@@ -53,7 +54,9 @@ enforces it. If a change needs more lines, something else should get simpler fir
 A provider is a class that satisfies [`subgoal/provider.py`](subgoal/provider.py):
 
 - Its constructor takes `model`, `allow` and `edit=True`. With `edit=False`, no session it
-  starts may edit anything, whatever `allow` says; the judge is built this way.
+  starts has an edit, write or patch tool, whatever `allow` says, but it may run shell commands
+  in the folder; the judge is built this way. Nothing stops such a command from writing a file:
+  the judge's prompt asks it to leave the work as it is.
 - `describe()` returns one line: the tool, model and permissions every call will use.
 - `run(prompt, workdir, timeout_s)` starts a **new** session in `workdir`, never resumes an
   old one, enforces the timeout, and returns a `Reply`. Anything unusable raises

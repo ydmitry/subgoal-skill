@@ -17,8 +17,9 @@ class ProviderError(Exception):
 
 
 class Provider(Protocol):
-    """A provider's constructor also takes `edit=True`. With False, every session it starts
-    must be unable to edit anything, and describe() says so. The judge is one."""
+    """A provider's constructor also takes `edit=True`. With False, no session it starts has a
+    tool that edits, writes or patches files, though it may run shell commands in the folder,
+    and describe() says so. The judge is one."""
 
     def describe(self) -> str:
         """One line: which tool, model and permissions every call will use.

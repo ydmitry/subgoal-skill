@@ -29,7 +29,7 @@ On names: the repo is `subgoal-skill`; the program and the skill are both called
 ```mermaid
 flowchart LR
     G([goal]) --> W["worker: a fresh agent session edits the folder"]
-    W --> C{"check command, or a read-only judge"}
+    W --> C{"check command, or a judge"}
     C -- met --> M([goal met, exit 0])
     C -- not met --> B{budget left?}
     B -- yes --> W
@@ -93,10 +93,13 @@ for each step the exact prompt, the reply, and the check output or the judge's r
 
 - **`--check CMD`** is a shell command the loop runs after every step. Exit 0 means met.
   Tests make the best checks. Use a check whenever a command can tell.
-- **No `--check`** means a judge decides: one more fresh agent session, read-only, that reads
-  the files against your goal and ends its reply with `VERDICT: met` or `VERDICT: not met`
-  (anything else is not met). Its "met" is a model's opinion, and the report says so. When the
-  files hold and only parts no file can show are left, it ends with `VERDICT: not met, cannot see: ...`.
+- **No `--check`** means a judge decides: one more fresh agent session with no edit tools. It
+  reads the files against your goal, may run commands in the folder (your tests, a script,
+  `node` or `python`) to check a part, and ends its reply with `VERDICT: met` or
+  `VERDICT: not met` (anything else is not met). Its "met" is a model's opinion, and the report
+  says so. It has no browser: when everything files and commands can show holds and only parts
+  neither can show are left (a page in a browser, a timing), it ends with
+  `VERDICT: not met, cannot see: ...`. In this mode the worker may run any command in the folder too.
   Try it on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
 - **`--protect PATH`** names files the worker must not touch, such as the tests. If one
   changes, the run stops before anything is checked.
@@ -107,18 +110,25 @@ The worker's own "I'm done" is printed in the report, but never trusted.
 
 How the worker edits unattended without `--dangerously-skip-permissions`: with the `claude-code`
 provider it runs in Claude Code's `acceptEdits` mode with permission prompts disabled, so it can
-edit files in the folder and run only the check command you pass. Anything else is denied rather
-than asked, so a run cannot hang waiting for an answer. The judge is read-only.
+edit files in the folder and run the check command you pass (with no check, any shell command).
+Anything else is denied rather than asked, so a run cannot hang waiting for an answer. The judge
+has no edit tools and may run shell commands in the folder.
 
-- **It runs a coding agent unattended, as you.** The worker edits files in `--dir` and, with a
-  check, may run that command too, so in effect it can run any code you can. Work on a
-  throwaway copy or a clean git state you can reset. Hooks and MCP servers in that folder run too.
+- **It runs a coding agent unattended, as you.** The worker edits files in `--dir` and runs
+  commands there: with a check, that command (any command with opencode); with no check, any
+  command, and the judge runs commands too. They run as you, unsandboxed, in the folder, so in
+  effect they can run any code you can. Work on a clean git tree or a branch you can reset.
+  Hooks and MCP servers in that folder run too.
 - **Never add `--dangerously-skip-permissions`** outside an isolated container with no
   internet access. The project itself never passes it.
 - **Every step spends your Claude subscription usage or API budget.** The limits bound the
   spend; they do not remove it.
-- **The judge is read-only, but it does not run your code.** It reads, so it cannot test
-  anything, and it can be wrong. "Goal met" proves what the check tests, nothing more. Read the diff.
+- **The judge has no edit tool, but a command it runs can still change files.** It is told to
+  leave the work as it is (run the tests, not fix them), and the loop does not check that it
+  did, so run on a clean git tree or a branch. Its "met" is a model's opinion and can be wrong.
+  A check command is still the strongest finish line, and the only one a model cannot talk its
+  way past. A browser or a timing is out of the judge's reach: use a `--check` that drives one.
+  "Goal met" proves what the check tests, nothing more. Read the diff.
 
 ## Use it as a Claude Code skill
 
@@ -139,10 +149,11 @@ the report at the end. The safety section applies unchanged.
 - **A check whenever a command can tell.** Exit 0 is the only road to "met", and the loop
   verifies nothing else: a done criterion left out of the check is checked by no one. Put a
   compound check (`make test && make lint`) in a script, and `--protect` the script.
-- **Without a check, write done criteria a reader can tick off from the files alone:**
-  numbered and observable ("README.md has three sections, in this order"), never "good
-  docs", and never "opens without errors": the judge only reads, so that needs a check. If the
-  judge's last review names such parts, the report lists them. See
+- **Without a check, write done criteria the judge can tick off from the files or from a
+  command it runs:** numbered and observable ("README.md has three sections, in this order",
+  "`npm test` passes"), never "good docs", and never "the page opens in a browser without
+  errors": the judge has no browser, so that needs a check that drives one. If the judge's
+  last review names such parts, the report lists them. See
   [`examples/write-the-docs/GOAL.md`](examples/write-the-docs/GOAL.md).
 - **Protect the finish line.** `--protect` the tests, the check script, anything that must not change.
 - **Stuck in a loop?** Add a sign: one line in the goal that says what not to do.
@@ -151,9 +162,9 @@ the report at the end. The safety section applies unchanged.
 
 | `--provider` | Runs | Notes |
 |---|---|---|
-| `claude-code` (default) | `claude -p`, a new session per call | The worker edits files and runs only the check you pass. |
-| `opencode` | `opencode run` (opencode 1.x), a new session per call | The worker may run any shell command in the folder. The judge can only read and run `git status`, `diff`, `log` and `show`. `--allow` is refused. |
-| `opencode2` | `opencode run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge is read-only as above and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
+| `claude-code` (default) | `claude -p`, a new session per call | The worker edits files and runs only the check you pass (and your `--allow` rules), or, with no check, any shell command. The judge has no edit tools or MCP servers and may run any shell command. |
+| `opencode` | `opencode run` (opencode 1.x), a new session per call | The worker may run any shell command in the folder. The judge has no edit tools, may run any shell command, and loads no plugins. `--allow` is refused. |
+| `opencode2` | `opencode run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge has no edit tools, may run shell commands under the same rule, and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
 
 Works with a recent Claude Code (last tried with 2.1.307), opencode 1.x (1.19.3) and opencode 2 (2.1.4).
 For opencode 2 the provider uses `opencode2` if it is on your PATH (its installer adds one), else `opencode`,

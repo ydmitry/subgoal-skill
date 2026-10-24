@@ -12,7 +12,11 @@ PROVIDERS = {"claude-code": ClaudeCode, "opencode": OpenCode, "opencode2": OpenC
 
 EPILOG = """exit codes: 0 goal_met | 1 out_of_iterations, out_of_time, out_of_tokens | 2 bad arguments
             3 provider_failed, protected_file_changed | 130 interrupted
-records:    DIR/.subgoal/<run-id>/   (this runs a coding agent as you: use a copy, read the diff)"""
+records:    DIR/.subgoal/<run-id>/
+safety:     the worker edits DIR and runs commands there as you, unsandboxed (claude-code with --check:
+            only the check and your --allow rules). With no --check the judge runs commands too: it
+            has no edit tools, but a command can still change files. Use a clean git tree or a
+            branch, and read the diff."""
 
 
 def parse_args(argv=None):
@@ -20,13 +24,14 @@ def parse_args(argv=None):
         prog="python3 -m subgoal", epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Call a coding agent in fresh sessions until --check exits 0 (or, with no --check, "
-                    "a read-only judge says met) or a budget ends.")
+                    "a judge says met) or a budget ends.")
     p.add_argument("--dir", required=True, help="the folder the agent works in (never $HOME or /)")
     goal = p.add_mutually_exclusive_group(required=True)
     goal.add_argument("--goal", metavar="TEXT", help="the goal, as text")
     goal.add_argument("--goal-file", type=Path, metavar="PATH", help="a file that holds the goal")
     p.add_argument("--check", metavar="CMD",
-                   help="shell command or script run in DIR; 0 = met. Without it, a judge decides")
+                   help="shell command or script run in DIR; 0 = met. Without it, a judge decides: "
+                        "an agent with no edit tools that may run commands in DIR")
     p.add_argument("--max-iterations", type=int, default=5, metavar="N", help="default 5")
     p.add_argument("--max-minutes", type=float, default=30, metavar="M", help="default 30")
     p.add_argument("--max-tokens", type=int, metavar="T", help="default: no limit")
@@ -56,8 +61,9 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    allow = args.allow if args.check is None else [f"Bash({args.check})", *args.allow]
-    provider = PROVIDERS[args.provider](model=args.model, allow=allow)    # the worker may run the check
+    # the worker may run the check, or, with no check (a judge decides), any command
+    allow = [f"Bash({args.check})" if args.check is not None else "Bash", *args.allow]
+    provider = PROVIDERS[args.provider](model=args.model, allow=allow)
     judge = None if args.check is not None else \
         PROVIDERS[args.provider](model=args.judge_model or args.model, edit=False)
     if args.dry_run:

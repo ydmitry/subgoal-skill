@@ -3,8 +3,8 @@
 fixtures/opencode_*.jsonl are real outputs of `opencode run --format json` (opencode 1.19.3)
 against a scripted local model (see test_opencode_real.py), with temp paths renamed:
 ok         the worker: a write outside the folder (denied), a read, a write, then its text
-read_only  the judge: write, edit and apply_patch (not offered), a redirect, `git diff --output`
-           and touch (denied), a read and `git status` (allowed), then its verdict
+judge      the judge: write, edit and apply_patch (not offered), then a command of its own, a read
+           and `git status` (allowed), then its verdict
 error      the model answered HTTP 400
 The `opencode` these tests start is a fake: a Python script that records how it was called.
 """
@@ -22,13 +22,15 @@ from pathlib import Path
 
 from fake import fake_opencode, gone, opencode_match
 from subgoal.cli import main
-from subgoal.opencode import AGENT, READ_ONLY_RULES, WORKER_RULES, OpenCode, parse
+from subgoal.opencode import AGENT, JUDGE_RULES, WORKER_RULES, OpenCode, parse
 from subgoal.provider import ProviderError
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
-OK, READ_ONLY, ERROR = ((FIXTURES / f"opencode_{name}.jsonl").read_text() for name in ("ok", "read_only", "error"))
-def decide(permission, pattern, rules=READ_ONLY_RULES):
+OK, JUDGE, ERROR = ((FIXTURES / f"opencode_{name}.jsonl").read_text() for name in ("ok", "judge", "error"))
+
+
+def decide(permission, pattern, rules=JUDGE_RULES):
     """opencode's own rule (docs: Permissions): the last rule that matches both wins."""
     flat = [(key, pat, action) for key, value in rules.items()
             for pat, action in (value.items() if isinstance(value, dict) else [("*", value)])]
@@ -81,28 +83,26 @@ class OpenCodeTest(unittest.TestCase):
         self.assertNotIn("--model", OpenCode().argv)
         for unsafe in ("--continue", "--session", "--fork", "--auto", "--yolo", "dangerously", "Bash(make test)"):
             self.assertNotIn(unsafe, " ".join(provider.argv) + provider.describe())
-        self.assertNotIn("read-only", provider.describe())
+        self.assertNotIn("no edit tools", provider.describe())
         self.assertIn("--dir DIR  (prompt on stdin)", provider.describe())
 
     def test_O1b_judge_argv_and_rules(self):
-        provider = OpenCode(allow=["Edit", "Bash(rm -rf *)"], executable=self.fake([{"stdout": READ_ONLY}]),
+        provider = OpenCode(allow=["Edit", "Bash(rm -rf *)"], executable=self.fake([{"stdout": JUDGE}]),
                             edit=False)
         provider.run("THE PROMPT", self.dir, 60)
         (call,) = self.calls()
         self.assertEqual(call["argv"], ["run", "--format", "json", "--pure", "--dir", str(self.dir)])
-        self.assertEqual(json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], READ_ONLY_RULES)
-        self.assertEqual(list(READ_ONLY_RULES)[0], "*")                     # deny all first, then allow
-        for tool in ("edit", "write", "apply_patch", "task", "webfetch", "todowrite", "skill", "a_mcp_tool"):
-            self.assertEqual(decide(tool, "app.txt"), "deny", tool)
+        self.assertEqual(json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], JUDGE_RULES)
+        self.assertEqual(list(JUDGE_RULES)[0], "*")                         # deny all first, then allow
+        for tool in ("edit", "write", "apply_patch", "patch", "multiedit", "task", "webfetch", "todowrite",
+                     "skill", "external_directory", "a_mcp_tool"):
+            self.assertEqual(decide(tool, "app.txt"), "deny", tool)         # no edit tool, nothing else
         for tool in ("read", "glob", "grep"):
             self.assertEqual(decide(tool, "app.txt"), "allow", tool)
-        for command in ("git status", "git status --short", "git diff HEAD~1", "git log -p -3", "git show HEAD"):
-            self.assertEqual(decide("bash", command), "allow", command)
-        for command in ("git status > app.txt", "git log >> notes.txt", "git diff --output=app.txt",
-                        "git diff --output app.txt", "touch judge.txt", "rm app.txt", "git commit -m x",
-                        "git -C /tmp diff", "cat app.txt", "git checkout ."):
-            self.assertEqual(decide("bash", command), "deny", command)
-        self.assertIn("read-only", provider.describe())
+        for command in ("git status", "git diff HEAD~1", "python3 -m unittest -q", "npm test", "./check.sh",
+                        "node build.js", "grep -c done app.txt", "make test > build.log"):
+            self.assertEqual(decide("bash", command), "allow", command)      # it may run commands
+        self.assertIn("no edit tools: it may run commands", provider.describe())
         self.assertNotIn("Edit", " ".join(provider.argv))                   # the caller's rules never widen it
 
     def test_O2_parse_ok(self):
@@ -111,8 +111,8 @@ class OpenCodeTest(unittest.TestCase):
         self.assertEqual(reply.tokens, 4 * 110)                 # four steps: input + output + reasoning + cache
         self.assertIsNone(reply.cost_usd)                       # the mock model has no price: unknown, not $0
         self.assertTrue(reply.session.startswith("ses_"))
-        judged = parse(0, READ_ONLY, "")
-        self.assertEqual((judged.text, judged.tokens), ("app.txt says done.\nVERDICT: met", 9 * 110))
+        judged = parse(0, JUDGE, "")
+        self.assertEqual((judged.text, judged.tokens), ("app.txt says done.\nVERDICT: met", 7 * 110))
         later = parse(0, step("Let me look.", cost=0.25) + step("Done.", cost=0.25), "")
         self.assertEqual((later.text, later.tokens, later.cost_usd), ("Done.", 220, 0.5))   # the last step's words
 
@@ -167,15 +167,15 @@ class OpenCodeTest(unittest.TestCase):
         self.assertNotIn("--pure", call["argv"])
 
     def test_O8_cli_with_a_judge(self):
-        self.fake([{"write": {"app.txt": "done\n"}, "stdout": OK}, {"stdout": READ_ONLY}])
+        self.fake([{"write": {"app.txt": "done\n"}, "stdout": OK}, {"stdout": JUDGE}])
         code, out = self.subgoal()
         self.assertEqual(code, 0, out)
         self.assertIn("GOAL MET after step 1: a judge said met", out)
-        self.assertIn("tokens    1,430 (", out)                         # the worker's 440 and the judge's 990
+        self.assertIn("tokens    1,210 (", out)                         # the worker's 440 and the judge's 770
         worker, judge = self.calls()
         self.assertTrue(judge["stdin"].startswith("You are a reviewer"))
         self.assertIn("--pure", judge["argv"])
-        self.assertEqual(json.loads(judge["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], READ_ONLY_RULES)
+        self.assertEqual(json.loads(judge["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], JUDGE_RULES)
         self.assertEqual(json.loads(worker["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], WORKER_RULES)
         self.assertEqual((self.dir / "app.txt").read_text(), "done\n")
 

@@ -48,8 +48,9 @@ You may run the command yourself to see where things stand."""
 
 FINISH_JUDGE = """\
 After you stop, a separate reviewer reads your result against the goal and decides.
-You cannot declare it met. The reviewer looks at the real files, not at what you say,
-and assumes you may have overclaimed: make every part of the goal true and visible there."""
+You cannot declare it met. The reviewer goes by the real files and the commands it runs, such
+as the tests, not by what you say, and assumes you may have overclaimed: make every part of the
+goal true and visible there. You may run commands in this folder yourself, such as the tests."""
 
 
 class StopReason(str, Enum):
@@ -153,7 +154,8 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
              clock=time.monotonic, judge: Provider | None = None):
     """Run the loop to its end and return the Run. Progress goes to stderr, the report to stdout.
 
-    The finish line is `check`, a command, or else `judge`, a read-only provider. Exactly one."""
+    The finish line is `check`, a command, or else `judge`, a provider built with edit=False.
+    Exactly one."""
     if (check is None) == (judge is None):
         raise ValueError("a run needs a check command or a judge: exactly one of them")
     workdir = safe_workdir(workdir)
@@ -245,8 +247,8 @@ def _budget(run, time_left):
 
 
 def _judge(run, judge, step, time_left):
-    """Ask a fresh read-only session if the goal is met. The worker's last words go in as a claim.
-    Records NN/judge-prompt.md, judge.md and judge-call.json; raises ProviderError like any call."""
+    """Ask a fresh session with no edit tools if the goal is met. The worker's last words go in as
+    a claim. Records NN/judge-prompt.md, judge.md and judge-call.json; raises ProviderError like any call."""
     prompt, began = judge_prompt(run.goal, run.dir, run.last_words), time.monotonic()
     (step / "judge-prompt.md").write_text(prompt)
     run.judge_calls += 1
@@ -310,15 +312,15 @@ def report(run):
     if run.stop_reason is StopReason.GOAL_MET:
         when = f"after step {last.step}" if last.step else "at the pre-check, before any step"
         said = "a judge said met" if judged else "the check exited 0"
-        caveat = ("That is a model's opinion of the files, not a test result." if judged else
+        caveat = ("That is a model's opinion, not a check command's exit code." if judged else
                   "This proves what the check tests and nothing more.")
         lines = [f"subgoal: GOAL MET {when}: {said}", f"  {caveat} Read the diff."]
     else:
         lines = [f"subgoal: GOAL NOT MET ({run.stop_reason.value})"]
         if judged and last and last.unseen:
-            lines += [f"  the judge's last review says the files hold and only parts no file can show are "
-                      f"left (a model's opinion): {last.unseen}",
-                      "  Only a command can show those: give the goal a --check, or take them out of it."]
+            lines += [f"  the judge's last review says the files hold and only parts no file or command can "
+                      f"show are left (a model's opinion): {last.unseen}",
+                      "  Give the goal a --check that shows them, or take them out of it."]
     limit = f"limit {limits.max_tokens:,}" if limits.max_tokens else "no limit set"
     tokens = f"{count(run.tokens)} ({limit}; as reported by the provider)"
     if run.tokens is None and limits.max_tokens:
@@ -329,7 +331,7 @@ def report(run):
         tokens = cost = "none (no worker calls)"
     if judged:
         ran = f"last verdict after step {last.step}: {last}" if last else "no verdict yet"
-        finish = f"judge     no check command: a read-only agent decides      {ran}"
+        finish = f"judge     no check command: an agent with no edit tools decides      {ran}"
     else:
         ran = f"last run after step {last.step}: exit {last}" if last else "did not finish"
         finish = f"check     {run.check}      {ran}"

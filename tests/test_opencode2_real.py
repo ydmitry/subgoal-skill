@@ -25,13 +25,13 @@ WORKER = [("shell", {"command": "ls"}),
           ("write", {"path": "app.txt", "content": "done\n"}),
           ("shell", {"command": "grep -q done app.txt && echo found"}),
           "I made app.txt say done."]
-# The judge tries every way to write it can name, then reads, which must still work.
+# The judge tries each edit tool (none is offered) and a command naming a path outside (denied,
+# as for the worker), then runs a check of its own, reads, and looks at git, which must all work.
 JUDGE = [("write", {"path": "app.txt", "content": "judged\n"}),
          ("edit", {"path": "app.txt", "oldString": "done", "newString": "judged"}),
          ("patch", {"patchText": "*** Begin Patch\n*** Add File: judge.txt\n+judged\n*** End Patch"}),
-         ("shell", {"command": "git status > app.txt"}),
-         ("shell", {"command": "git diff --output=app.txt"}),
-         ("shell", {"command": "git status && touch judge.txt"}),
+         ("shell", {"command": "cat /etc/hosts"}),
+         ("shell", {"command": "grep -q done app.txt && echo passed"}),
          ("read", {"path": "app.txt"}),
          ("shell", {"command": "git status --short"}),
          "app.txt says done.\nVERDICT: met"]
@@ -84,8 +84,8 @@ class RealOpenCode2Test(opencode_mock.RealOpenCodeCase):
         self.assertTrue(call["session"].startswith("ses_"))
         self.assertEqual((step / "reply.md").read_text(), "I made app.txt say done.\n")
 
-    def test_R2_the_judge_cannot_write(self):
-        code, out = self.subgoal()                               # no --check: a read-only judge decides
+    def test_R2_the_judge_has_no_edit_tools_but_runs_commands(self):
+        code, out = self.subgoal()                               # no --check: a judge decides
         self.assertEqual(code, 0, out)
         self.assertIn("GOAL MET after step 1: a judge said met", out)
         self.assertEqual((self.project / "app.txt").read_text(), "done\n")    # the worker's edit, no more
@@ -96,10 +96,10 @@ class RealOpenCode2Test(opencode_mock.RealOpenCodeCase):
         self.assertEqual(len(said), len(JUDGE) - 1)
         for text in said[:3]:                                    # write, edit, patch: not offered
             self.assertIn("is currently available", text)
-        for text in said[3:6]:                                   # the redirect, --output, touch
-            self.assertIn("Permission denied: shell", text)
-        self.assertIn("1: done", said[6])                       # reading still works
-        self.assertNotIn("Permission denied", said[7])          # and so does git status
+        self.assertIn("Permission denied: shell", said[3])      # a path outside the folder
+        self.assertIn("passed", said[4])                        # a command of its own runs
+        self.assertIn("1: done", said[5])                       # reading works
+        self.assertNotIn("Permission denied", said[6])          # and so does git status
         step = next(self.project.glob(".subgoal/*/01"))
         self.assertTrue((step / "judge.md").read_text().endswith("VERDICT: met\n"))
 

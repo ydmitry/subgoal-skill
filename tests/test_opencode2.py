@@ -5,8 +5,8 @@ fixtures/opencode2_*.jsonl are real outputs of `opencode run --standalone --form
 renamed. opencode 2.1.4 stops reading events once the session is idle, so the last step's
 step_finish (its tokens and cost) is usually missing:
 ok         the worker: a write outside the folder (denied), a read, a write, then its text
-read_only  the judge: write, edit and patch (not offered), a redirect, `git diff --output`
-           and `git status && touch` (denied), a read and `git status` (allowed), then "not met"
+judge      the judge: write, edit and patch (not offered), `cat /etc/hosts` (denied), then a
+           command of its own, a read and `git status` (allowed), then its verdict
 error      the model answered HTTP 400
 The `opencode2` these tests start is a fake: a Python script that records how it was called.
 """
@@ -25,18 +25,18 @@ from unittest import mock
 
 from fake import fake_opencode, gone, opencode_match
 from subgoal.cli import main
-from subgoal.opencode2 import AGENT, READ_ONLY_RULES, WORKER_RULES, OpenCode2
+from subgoal.opencode2 import AGENT, JUDGE_RULES, WORKER_RULES, OpenCode2
 from subgoal.opencode import parse
 from subgoal.provider import ProviderError
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
-OK, READ_ONLY, ERROR = ((FIXTURES / f"opencode2_{name}.jsonl").read_text() for name in ("ok", "read_only", "error"))
+OK, JUDGE, ERROR = ((FIXTURES / f"opencode2_{name}.jsonl").read_text() for name in ("ok", "judge", "error"))
 FLAGS = ["run", "--standalone", "--format", "json", "--agent", AGENT]
 BASE = {"action": "*", "resource": "*", "effect": "allow"}    # opencode 2's base policy (docs: Permissions)
 
 
-def decide(action, resource, rules=READ_ONLY_RULES):
+def decide(action, resource, rules=JUDGE_RULES):
     """opencode 2's own rule (docs: Permissions): the last rule that matches both wins."""
     return [r["effect"] for r in rules
             if opencode_match(action, r["action"]) and opencode_match(resource, r["resource"])][-1]
@@ -90,30 +90,29 @@ class OpenCode2Test(unittest.TestCase):
         for unsafe in ("--continue", "--session", "--fork", "--auto", "--server", "--yolo", "dangerously",
                        "Bash(make test)"):
             self.assertNotIn(unsafe, " ".join(provider.argv) + provider.describe())
-        self.assertNotIn("read-only", provider.describe())
+        self.assertNotIn("no edit tools", provider.describe())
         self.assertIn("(run in DIR, prompt on stdin)", provider.describe())
 
     def test_P1b_judge_argv_and_rules(self):
-        provider = OpenCode2(allow=["Edit"], executable=self.fake([{"stdout": READ_ONLY}]), edit=False)
+        provider = OpenCode2(allow=["Edit"], executable=self.fake([{"stdout": JUDGE}]), edit=False)
         provider.run("THE PROMPT", self.dir, 60)
         (call,) = self.calls()
         self.assertEqual(call["argv"], FLAGS)
         self.assertEqual(call["env"]["OPENCODE_DISABLE_PROJECT_CONFIG"], "1")    # no plugins from DIR
         self.assertEqual(json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"])["agents"][AGENT]["permissions"],
-                         READ_ONLY_RULES)
-        self.assertEqual(READ_ONLY_RULES[0], {"action": "*", "resource": "*", "effect": "deny"})
-        for action in ("edit", "shell", "execute", "subagent", "skill", "webfetch", "websearch", "question",
-                       "external_directory", "a_mcp_tool"):
-            self.assertEqual(decide(action, "app.txt"), "deny", action)
+                         JUDGE_RULES)
+        self.assertEqual(JUDGE_RULES[0], {"action": "*", "resource": "*", "effect": "deny"})
+        for action in ("edit", "write", "patch", "apply_patch", "execute", "subagent", "skill", "webfetch",
+                       "websearch", "question", "external_directory", "a_mcp_tool"):
+            self.assertEqual(decide(action, "app.txt"), "deny", action)      # no edit tool, nothing else
         for action in ("read", "glob", "grep"):
             self.assertEqual(decide(action, "app.txt"), "allow", action)
-        for command in ("git status", "git status --short", "git diff HEAD~1", "git log -p -3", "git show HEAD"):
-            self.assertEqual(decide("shell", command), "allow", command)
-        for command in ("git status > app.txt", "git log >> notes.txt", "git diff --output=app.txt",
-                        "git diff --output app.txt", "touch judge.txt", "rm app.txt", "git commit -m x",
-                        "git -C /tmp diff", "cat app.txt", "git checkout ."):
-            self.assertEqual(decide("shell", command), "deny", command)
-        self.assertIn("read-only", provider.describe())
+        for command in ("git status", "git diff HEAD~1", "python3 -m unittest -q", "npm test", "./check.sh",
+                        "node build.js", "grep -c done app.txt", "make test > build.log"):
+            self.assertEqual(decide("shell", command), "allow", command)     # it may run commands
+        for command in ("cat /etc/hosts", "echo x > /tmp/x", "cp app.txt ../x", "cat ~/.ssh/config"):
+            self.assertEqual(decide("shell", command), "deny", command)      # under the worker's path rule
+        self.assertIn("no edit tools: it may run commands", provider.describe())
         self.assertNotIn("Edit", " ".join(provider.argv))                   # the caller's rules never widen it
 
     def test_P2_parse_real_output(self):
@@ -122,8 +121,8 @@ class OpenCode2Test(unittest.TestCase):
         self.assertEqual(reply.tokens, 3 * 110)              # four steps, the last one's tokens not reported
         self.assertIsNone(reply.cost_usd)                    # the mock model has no price: unknown, not $0
         self.assertTrue(reply.session.startswith("ses_"))
-        judged = parse(0, READ_ONLY, "")
-        self.assertEqual((judged.text, judged.tokens), ("app.txt says todo.\nVERDICT: not met", 8 * 110))
+        judged = parse(0, JUDGE, "")
+        self.assertEqual((judged.text, judged.tokens), ("app.txt says done.\nVERDICT: met", 7 * 110))
 
     def test_P3_error_event(self):
         with self.assertRaisesRegex(ProviderError, r"exit 1\): scripted failure$"):
@@ -193,17 +192,16 @@ class OpenCode2Test(unittest.TestCase):
         self.assertNotIn("PWD", call["env"])
 
     def test_P7_cli_with_a_judge(self):
-        self.fake([{"write": {"app.txt": "done\n"}, "stdout": OK}, {"stdout": READ_ONLY}])
+        self.fake([{"write": {"app.txt": "done\n"}, "stdout": OK}, {"stdout": JUDGE}])
         code, out = self.subgoal()
-        self.assertEqual(code, 1, out)                       # the recorded judge said not met
-        self.assertIn("GOAL NOT MET (out_of_iterations)", out)
-        self.assertIn("last verdict after step 1: not met", out)
-        self.assertIn("app.txt says todo.", out)            # the judge's reasons, from its real reply
+        self.assertEqual(code, 0, out)                       # the recorded judge said met
+        self.assertIn("GOAL MET after step 1: a judge said met", out)
+        self.assertIn("app.txt says done.", out)            # the judge's reasons, from its real reply
         worker, judge = self.calls()
         self.assertTrue(judge["stdin"].startswith("You are a reviewer"))
         self.assertEqual(judge["env"]["OPENCODE_DISABLE_PROJECT_CONFIG"], "1")
         self.assertNotIn("OPENCODE_DISABLE_PROJECT_CONFIG", worker["env"])
-        for call, rules in ((worker, WORKER_RULES), (judge, READ_ONLY_RULES)):
+        for call, rules in ((worker, WORKER_RULES), (judge, JUDGE_RULES)):
             self.assertEqual(json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"])["agents"][AGENT]["permissions"], rules)
 
     def test_P8_cli_surface(self):

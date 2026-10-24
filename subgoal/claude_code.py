@@ -11,10 +11,8 @@ RESUME_ID_KEY = "session" + "_id"
 # The token counts in claude's "usage" object. Their sum is the call's token total.
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens",
                 "cache_read_input_tokens")
-# What a read-only session may use: look at files, and look at git. Nothing else.
-READ_ONLY_ALLOW = ("Read", "Grep", "Glob", "Bash(git status *)", "Bash(git diff *)",
-                   "Bash(git log *)", "Bash(git show *)")
-READ_ONLY_DENY = ("Bash(*--output*)",)     # `git diff --output=FILE` would write a file
+# What the judge (edit=False) may use: read files, and run shell commands in the folder. No edit tool.
+JUDGE_TOOLS = ("Read", "Grep", "Glob", "Bash")
 
 
 class ClaudeCode:
@@ -31,12 +29,10 @@ class ClaudeCode:
         self.argv = [executable, "-p", "--output-format", "json",
                      "--permission-mode", mode, "--permission-prompts", "none"]
         if not edit:
-            # --tools                the edit and write tools do not exist in this session
+            # --tools                only these exist in this session: no Edit, Write or NotebookEdit
             # --strict-mcp-config    no MCP tools, which could write outside the folder
-            # --disallowedTools      beats the allow list, which `git diff --output=FILE` would slip past
-            self.argv += ["--tools", "Read,Grep,Glob,Bash", "--strict-mcp-config",
-                          "--disallowedTools", *READ_ONLY_DENY]
-            allow = READ_ONLY_ALLOW                    # the caller's extra rules never widen it
+            self.argv += ["--tools", ",".join(JUDGE_TOOLS), "--strict-mcp-config"]
+            allow = JUDGE_TOOLS                        # the caller's extra rules never widen it
         if model:
             self.argv += ["--model", model]
         if allow:
@@ -44,7 +40,7 @@ class ClaudeCode:
 
     def describe(self):
         model = "" if "--model" in self.argv else ", your default model"
-        only = ", read-only: edits are denied" if not self.edit else ""
+        only = ", no edit tools: it may run commands" if not self.edit else ""
         return f"{shlex.join(self.argv)}  (prompt on stdin{model}{only})"
 
     def run(self, prompt, workdir, timeout_s):

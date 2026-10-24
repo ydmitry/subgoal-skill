@@ -10,12 +10,9 @@ AGENT = "subgoal"    # every call runs as this agent, which the call's own confi
 # opencode asks before these by default. `opencode run` rejects every ask, and a rejection ends
 # the session, so the worker is told no instead and goes on: no paths outside the folder.
 WORKER_RULES = {"external_directory": "deny", "doom_loop": "deny"}
-# What a read-only session may use: look at files, and look at git. The last matching rule wins,
-# so the denials for a redirect and for `git diff --output=FILE` (both write a file) come last.
-READ_ONLY_RULES = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow",
-                   "bash": {"*": "deny", "git status *": "allow", "git diff *": "allow",
-                            "git log *": "allow", "git show *": "allow", "*>*": "deny",
-                            "*--output*": "deny"}}
+# What the judge (edit=False) may use: read files, and run shell commands in the folder like the
+# worker. Everything else is denied, edit (which covers write and apply_patch) included.
+JUDGE_RULES = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "bash": "allow"}
 
 
 class OpenCode:
@@ -28,10 +25,10 @@ class OpenCode:
         #                          default agent is an error, not a fallback)
         # allow                    Claude Code rules, unused: the CLI refuses --allow for opencode, and
         #                          the worker may already run any command in the folder, the check too
-        # --pure (edit=False)     no plugins, whose code could write
+        # --pure (edit=False)     no plugins, whose code would run unasked in the judge's session
         self.edit, self.executable = edit, executable
         config = {"default_agent": AGENT, "agent": {AGENT: {
-            "mode": "primary", "permission": WORKER_RULES if edit else READ_ONLY_RULES}}}
+            "mode": "primary", "permission": WORKER_RULES if edit else JUDGE_RULES}}}
         self.argv = ["env", "OPENCODE_CONFIG_CONTENT=" + json.dumps(config, separators=(",", ":")),
                      executable, "run", "--format", "json"]
         if not edit:
@@ -41,7 +38,7 @@ class OpenCode:
 
     def describe(self):
         model = "" if "--model" in self.argv else ", your default model"
-        only = ", read-only: edits are denied" if not self.edit else ""
+        only = ", no edit tools: it may run commands" if not self.edit else ""
         return f"{shlex.join(self.argv)} --dir DIR  (prompt on stdin{model}{only})"
 
     def run(self, prompt, workdir, timeout_s):
