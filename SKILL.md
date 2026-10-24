@@ -11,11 +11,11 @@ goal is met or a budget ends. A check command decides; with none, a judge (no ed
 ## 1. Turn the request into a goal, and a check when one exists
 
 - **Goal:** a few short lines of observable done criteria, plus any constraint ("without editing the tests").
-- **Check:** when a command can tell (tests, a build, a linter), add `--check`: a shell command
-  or a script (`--check ./check.sh`), run in the project folder, that exits 0 only when the
-  goal holds. Never one that passes trivially. It is the strongest finish line, the only one a
-  model cannot talk its way past. Without it, a judge decides: it reads files and may run
-  commands and can drive a headless browser if one is installed; a timing needs a check.
+  With no check, a goal that names a skill is judged on the worker's tool calls (`NN/trace.md`) too.
+- **Check:** when a command can tell (tests, a build), add `--check`: a command or script
+  (`--check ./check.sh`), run in the project folder, that exits 0 only when the goal holds (never
+  a trivial one): the only finish line a model cannot talk its way past. With none, a judge decides:
+  it reads files, may run commands, can drive a headless browser if installed; a timing needs a check.
 - **Protect the finish line:** `--protect` the test files, the check script, or any file the
   work must not change. Put a compound check (`&&`, `|`) in a script. If unclear, ask the user.
 

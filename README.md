@@ -87,7 +87,8 @@ worker's own notes.
 Add `--dry-run` first to see the exact command and the first prompt, with no agent called.
 
 Everything the run did is in that `records` folder: `run.json`, the worker's `notes.md`, and
-for each step the exact prompt, the reply, and the check output or the judge's reply.
+for each step the exact prompt, the reply, the check output or the judge's reply, and (with
+`claude-code`) `trace.md`, the worker's tool calls.
 
 ## Who says "done": a check or a judge
 
@@ -102,6 +103,13 @@ for each step the exact prompt, the reply, and the check output or the judge's r
   browser installed, a timing), it ends with
   `VERDICT: not met, cannot see: ...`. In this mode the worker may run any command in the folder too.
   Try it on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
+- **A goal that names a skill** ("use the tiny skill to create hello.txt"), with no `--check`, is
+  judged on how the work was done, not only on the result. After each step the loop writes the worker's tool calls
+  to `NN/trace.md` in the records, one line per call, in order (`Skill tiny`, `Bash ls`,
+  `Write /path/hello.txt`, a run of reads as `Read x3`), never what a call returned. The judge
+  reads the skill's `SKILL.md` and that trace: a skill that was never invoked, or a step it
+  requires that the trace does not show, is not met. The trace comes from `claude-code` only for
+  now; with opencode there is none, and the judge is told to say it could not see how the work was done.
 - **`--protect PATH`** names files the worker and the judge must not touch, such as the tests.
   If the worker changes one, the run stops before anything is checked; if a command the judge
   runs changes one, the run stops and its verdict does not count.
@@ -171,7 +179,7 @@ the report at the end. The safety section applies unchanged.
 | `opencode` | `opencode run` (opencode 1.x), a new session per call | The worker may run any shell command in the folder. The judge has no edit tools, may run any shell command, and loads no plugins. `--allow` is refused. |
 | `opencode2` | `opencode run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge has no edit tools, may run shell commands under the same rule, and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
 
-Works with a recent Claude Code (last tried with 2.1.307), opencode 1.x (1.19.3) and opencode 2 (2.1.4).
+Works with a recent Claude Code (last tried with 2.1.310), opencode 1.x (1.19.3) and opencode 2 (2.1.4).
 For opencode 2 the provider uses `opencode2` if it is on your PATH (its installer adds one), else `opencode`,
 and refuses any binary that does not report version 2.
 Adding another provider is small: see [CONTRIBUTING.md](CONTRIBUTING.md).

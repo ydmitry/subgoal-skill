@@ -64,7 +64,8 @@ A provider is a class that satisfies [`subgoal/provider.py`](subgoal/provider.py
   `ProviderError`. A number the tool does not report is `None`, never 0.
 - `Reply.trace` is optional: one short line per tool call the agent made, in order (the tool and
   its key argument, never what the call returned), or `None` when you do not report them.
-  `claude_code.py` builds one; the opencode providers leave it `None` for now.
+  The loop writes it to the step's `NN/trace.md`, where the judge reads it when the goal names
+  a skill. `claude_code.py` builds one; the opencode providers leave it `None` for now.
 
 Then register it in `PROVIDERS` in [`subgoal/cli.py`](subgoal/cli.py). The loop does not
 change. [`subgoal/opencode.py`](subgoal/opencode.py) is a good model to copy: permissions
