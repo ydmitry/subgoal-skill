@@ -154,8 +154,14 @@ class ClaudeCodeTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, r"exit 0\): no output"):
             parse(0, "", "")
         no_result = "\n".join(line for line in OK.splitlines() if '"type": "result"' not in line)
-        with self.assertRaisesRegex(ProviderError, "exit 0"):                  # a stream cut before its result
-            parse(0, no_result, "")
+        for code, stream, said in ((0, no_result, r"no result event in \d+ stream events"),
+                                   (1, OK.replace('"result": "done"', '"result": ""'), "its result event gave no detail")):
+            with self.assertRaisesRegex(ProviderError, rf"exit {code}\): {said}$") as raised:
+                parse(code, stream, "")                                    # a stream cut before its result
+            for leaked in ("alpha", "beta", "tool_result"):
+                self.assertNotIn(leaked, str(raised.exception))            # never what the tools returned
+        with self.assertRaisesRegex(ProviderError, "exit 1\): cut off"):  # stderr still comes first
+            parse(1, no_result, "cut off")
         reply = parse(0, "not JSON\n[1, 2]\n" + OK + "garbage {\n", "")          # stray lines are skipped
         self.assertEqual((reply.text, reply.trace.splitlines()[0]), ("done", "Read x2"))
 

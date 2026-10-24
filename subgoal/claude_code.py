@@ -61,7 +61,7 @@ class ClaudeCode:
 def parse(exit_code, stdout, stderr):
     """Map claude's output onto a Reply: the last result event of the stream, and the trace from
     its tool calls, or one JSON object (`--output-format json`, no trace). Unusable: ProviderError."""
-    data, trace = _json(stdout), None
+    data, trace, events = _json(stdout), None, []
     if not isinstance(data, dict):
         events = [e for e in map(_json, stdout.splitlines()) if isinstance(e, dict)]
         results = [e for e in events if e.get("type") == "result"]
@@ -69,7 +69,9 @@ def parse(exit_code, stdout, stderr):
     if not isinstance(data, dict) or exit_code != 0 or data.get("is_error"):
         said = data.get("result") or "; ".join(map(str, data.get("errors") or [])) \
             if isinstance(data, dict) else ""
-        detail = said or stderr.strip()[-2000:] or stdout.strip()[-2000:] or "no output"
+        raw = stdout.strip()[-2000:] if not events else "its result event gave no detail" if data \
+            else f"no result event in {len(events)} stream events"    # never the stream: it holds what tools returned
+        detail = said or stderr.strip()[-2000:] or raw or "no output"
         raise ProviderError(f"claude -p failed (exit {exit_code}): {detail}")
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
     counts = [usage[k] for k in TOKEN_FIELDS if isinstance(usage.get(k), int)]
