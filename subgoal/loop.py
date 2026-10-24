@@ -208,7 +208,10 @@ def _steps(run, provider, judge, guarded, time_left):
             return StopReason.OUT_OF_TIME if time_left() <= 0 else StopReason.PROVIDER_FAILED
         worker_s = time.monotonic() - began
         (step / "reply.md").write_text(reply.text + "\n")           # d: kept for you, not the model
-        write_json(step / "call.json", dict(asdict(reply), text="(reply.md)", seconds=round(worker_s)))
+        if reply.trace is not None:                                 # its tool calls, as the provider saw them
+            (step / "trace.md").write_text((reply.trace or "(no tool calls)") + "\n")
+        write_json(step / "call.json", dict(asdict(reply), text="(reply.md)", seconds=round(worker_s),
+                                            trace=None if reply.trace is None else "(trace.md)"))
         run.last_words = reply.text
         run.tokens, run.cost_usd = add(run.tokens, reply.tokens), add(run.cost_usd, reply.cost_usd)
         if _moved(run, guarded, "worker"):                          # e: the finish line was moved

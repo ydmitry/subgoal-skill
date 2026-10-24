@@ -144,6 +144,21 @@ class LoopTest(unittest.TestCase):
         self.assertEqual((run.folder / "report.md").read_text(), self.printed)
         self.assertEqual((run.folder / "01" / "prompt.md").read_text(), self.fake.prompts[0])
 
+    def test_L14_trace_only_when_reported(self):
+        traced = lambda trace: lambda workdir: Reply("I wrote it.", trace=trace)
+        run = self.go([say(), traced("Skill tiny\nWrite /w/app.py"), traced(""), edit("app.py", "done\n")],
+                      limits=Limits(max_iterations=4))
+        self.ended(run, R.GOAL_MET, 0, calls=4)
+        has = {name: (run.folder / name / "trace.md").exists() for name in ("01", "02", "03", "04")}
+        self.assertEqual(has, {"01": False, "02": True, "03": True, "04": False})    # None: no file
+        self.assertEqual((run.folder / "02" / "trace.md").read_text(), "Skill tiny\nWrite /w/app.py\n")
+        self.assertEqual((run.folder / "03" / "trace.md").read_text(), "(no tool calls)\n")
+        calls = [json.loads((run.folder / n / "call.json").read_text())["trace"] for n in ("01", "02")]
+        self.assertEqual(calls, [None, "(trace.md)"])                     # not copied into call.json
+        self.assertFalse(list(self.dir.glob("trace.md")))                 # never in the work folder
+        for prompt in self.fake.prompts:
+            self.assertNotIn("trace", prompt)                             # the worker is not told
+
 
 if __name__ == "__main__":
     unittest.main()
