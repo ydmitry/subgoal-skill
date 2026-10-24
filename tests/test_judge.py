@@ -117,10 +117,15 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertEqual(saved["last_verdict"], {"met": True, "reasons": "fine", "step": 1, "unseen": None})
         self.assertEqual((run.folder / "report.md").read_text(), self.printed)
         for said in ("GOAL MET after step 1: a judge said met", "a model's opinion", "Read the diff",
-                     "1 of 5 worker calls (judge calls: 1)", "judge via", "first lines", "fine"):
+                     "1 of 5 worker calls (judge calls: 1)", "judge via", "last lines", "fine"):
             self.assertIn(said, self.printed)
         for claim in ("check exited 0", "exit 0", "proves what the check tests"):
             self.assertNotIn(claim, self.printed)
+        reasons = "\n".join(f"Holds: part {n}." for n in range(1, 8)) + "\nMissing: the blocker."
+        self.go([say()], [judges(False, reasons)], limits=Limits(max_iterations=1))
+        self.assertIn("    Holds: part 3.\n", self.printed)
+        self.assertIn("    Missing: the blocker.\n", self.printed)       # the judge's conclusion comes last
+        self.assertNotIn("Holds: part 2.", self.printed)
 
     def test_J7_limits_apply_to_the_judge(self):
         run = self.go([say(tokens=600)] * 3, [judges(False, tokens=600)] * 3, limits=Limits(max_tokens=1000))

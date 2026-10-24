@@ -350,9 +350,9 @@ def report(run):
         lines.append(f"  worker's last words (unverified): \"{' '.join(run.last_words.split())[:300]}\"")
     detail = last and (last.reasons if judged else last.output)
     if detail and detail.strip():
-        lines.append("  judge's reasons (a model's opinion; first lines):" if judged else
+        lines.append("  judge's reasons (a model's opinion; last lines):" if judged else
                      "  check output (tail):")
         shown = detail.strip().splitlines()
-        lines += [f"    {line}".rstrip() for line in (shown[:6] if judged else shown[-6:])]
+        lines += [f"    {line}".rstrip() for line in shown[-6:]]
     lines.append(f"  records   {run.folder}/")
     return "\n".join(lines)
