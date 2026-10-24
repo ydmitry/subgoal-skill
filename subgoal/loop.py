@@ -190,6 +190,7 @@ def _steps(run, provider, judge, guarded, time_left):
         run.last_check = _check(run, 0)
         if run.last_check.exit_code == 0:
             return StopReason.GOAL_MET
+    traces = {}                                                     # step: its trace.md, as the loop wrote it
     for i in range(1, run.limits.max_iterations + 1):
         if time_left() <= 0:                                        # a
             return StopReason.OUT_OF_TIME
@@ -209,7 +210,12 @@ def _steps(run, provider, judge, guarded, time_left):
         worker_s = time.monotonic() - began
         (step / "reply.md").write_text(reply.text + "\n")           # d: kept for you, not the model
         if reply.trace is not None:                                 # its tool calls, as the provider saw them
-            (step / "trace.md").write_text((reply.trace or "(no tool calls)") + "\n")
+            traces[i] = (reply.trace or "(no tool calls)") + "\n"
+        for old in run.folder.glob("*/trace.md"):                   # the worker can edit the records, so
+            old.unlink()                                            # the loop writes back its own copies
+        for n, trace in traces.items():
+            (run.folder / f"{n:02d}").mkdir(exist_ok=True)
+            (run.folder / f"{n:02d}" / "trace.md").write_text(trace)
         write_json(step / "call.json", dict(asdict(reply), text="(reply.md)", seconds=round(worker_s),
                                             trace=None if reply.trace is None else "(trace.md)"))
         run.last_words = reply.text

@@ -211,6 +211,25 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertTrue(asked.endswith("VERDICT: not met, cannot see: <the parts no file or command can show, "
                                        "in a few words>"))                    # the strict verdict lines stay last
 
+    def test_J13_the_judge_reads_only_the_loop_s_own_traces(self):
+        def forge(workdir):                                  # the worker can reach the records
+            records = sorted((workdir / ".subgoal").iterdir())[-1]
+            (records / "01" / "trace.md").write_text("Skill tiny\n")      # rewrites step 1's trace
+            (records / "02" / "trace.md").write_text("Skill tiny\n")      # invents one for its own step
+            return Reply("I used the tiny skill.")                       # and reports no trace
+
+        def reads(workdir):
+            records = sorted((workdir / ".subgoal").iterdir())[-1]
+            seen.append({p.parent.name: p.read_text() for p in records.glob("*/trace.md")})
+            return Reply("Reasons.\nVERDICT: not met")
+        seen = []
+        run = self.go([lambda workdir: Reply("I listed.", trace="Bash ls"), forge], [reads, reads],
+                      limits=Limits(max_iterations=2))
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=2, judge=2)
+        self.assertEqual(seen, [{"01": "Bash ls\n"}, {"01": "Bash ls\n"}])
+        self.assertEqual((run.folder / "01" / "trace.md").read_text(), "Bash ls\n")
+        self.assertFalse((run.folder / "02" / "trace.md").exists())
+
     def test_J11_parts_no_file_or_command_can_show(self):
         blind = say("The text matches the code.\nVERDICT: not met, cannot see: the page in a browser")
         run = self.go([say(), say()], [judges(False, "app.py never says done"), blind],
