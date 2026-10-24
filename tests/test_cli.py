@@ -51,14 +51,14 @@ class CliTest(unittest.TestCase):
         code, out = self.cli("--dir", str(self.dir), "--goal", "Review the docs.", "--dry-run")
         self.assertEqual(code, 0)
         self.assertIn(f"provider: {ClaudeCode().describe()}\n", out)           # no Bash(<check>) rule
-        self.assertIn(f"judge: {ClaudeCode(read_only=True).describe()}\n", out)
+        self.assertIn(f"judge: {ClaudeCode(edit=False).describe()}\n", out)
         self.assertIn("a separate reviewer reads your result against the goal and decides", out)
         self.assertIn("LAST REVIEW (none yet: this is the first step)", out)
         self.assertIn("<the worker's last words go here>", out)             # the judge prompt template
         self.assertNotIn("pre-check: exit", out)
         self.assertEqual(list(self.dir.iterdir()), [])
 
-    def test_X4_the_judge_is_built_read_only(self):
+    def test_X4_the_judge_is_built_with_edit_off(self):
         for argv, check, worker_model, judge_model in [
                 (["--model", "w", "--judge-model", "j"], None, "w", "j"),
                 (["--model", "w"], None, "w", "w"),
@@ -67,11 +67,11 @@ class CliTest(unittest.TestCase):
                 run_loop.return_value.stop_reason = StopReason.GOAL_MET
                 self.assertEqual(self.cli("--dir", str(self.dir), "--goal", "g", *argv)[0], 0)
             (goal, passed_check, _dir, worker), judge = run_loop.call_args.args[:4], run_loop.call_args.kwargs["judge"]
-            self.assertEqual((passed_check, worker.read_only), (check, False))
+            self.assertEqual((passed_check, worker.edit), (check, True))
             self.assertEqual("--model" in worker.argv and worker.argv[worker.argv.index("--model") + 1], worker_model)
             self.assertEqual("Bash(true)" in worker.argv, check is not None)    # the allow rule needs --check
             if check is None:
-                self.assertTrue(judge.read_only)
+                self.assertFalse(judge.edit)
                 self.assertEqual(judge.argv[judge.argv.index("--model") + 1], judge_model)
             else:
                 self.assertIsNone(judge)

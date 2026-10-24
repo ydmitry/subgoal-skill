@@ -59,7 +59,7 @@ def main(argv=None):
     allow = args.allow if args.check is None else [f"Bash({args.check})", *args.allow]
     provider = PROVIDERS[args.provider](model=args.model, allow=allow)    # the worker may run the check
     judge = None if args.check is not None else \
-        PROVIDERS[args.provider](model=args.judge_model or args.model, read_only=True)
+        PROVIDERS[args.provider](model=args.judge_model or args.model, edit=False)
     if args.dry_run:
         last = None if judge else run_check(args.check, args.dir, CHECK_TIMEOUT_S)
         print("DRY RUN: no agent call, no run folder. " + ("There is no check, so a judge decides after "

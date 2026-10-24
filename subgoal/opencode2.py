@@ -35,7 +35,7 @@ READ_ONLY_RULES = [rule("*", "*", "deny"), *(rule(action, "*", "allow") for acti
 class OpenCode2:
     """Every call runs the same command with the same config, so the permissions are fixed here, once."""
 
-    def __init__(self, model=None, allow=(), executable=None, read_only=False):
+    def __init__(self, model=None, allow=(), executable=None, edit=True):
         # run --standalone         a private server that lives as long as this call. The shared
         #                          background service is never used: it would not see this config
         # env -u PWD               opencode takes its folder from $PWD before its cwd, which is DIR
@@ -43,15 +43,15 @@ class OpenCode2:
         #                          rules above, which come after every other config's rules
         # --agent                  an agent that is missing stops the call (a missing default would
         #                          fall back to another agent)
-        # no project config        (read_only) no opencode config or plugins from DIR: plugin code
+        # no project config        (edit=False) no opencode config or plugins from DIR: plugin code
         #                          could write
         # allow                    Claude Code rules, unused, as for opencode 1
         # executable               default: opencode2 (the installer's name) if on PATH, else opencode
         executable = executable or ("opencode2" if shutil.which("opencode2") else "opencode")
-        self.read_only, self.executable, self.version = read_only, executable, None
+        self.edit, self.executable, self.version = edit, executable, None
         config = {"agents": {AGENT: {"mode": "primary",
-                                     "permissions": READ_ONLY_RULES if read_only else WORKER_RULES}}}
-        self.argv = ["env", "-u", "PWD", *(["OPENCODE_DISABLE_PROJECT_CONFIG=1"] if read_only else []),
+                                     "permissions": WORKER_RULES if edit else READ_ONLY_RULES}}}
+        self.argv = ["env", "-u", "PWD", *([] if edit else ["OPENCODE_DISABLE_PROJECT_CONFIG=1"]),
                      "OPENCODE_CONFIG_CONTENT=" + json.dumps(config, separators=(",", ":")),
                      executable, "run", "--standalone", "--format", "json", "--agent", AGENT]
         if model:
@@ -59,7 +59,7 @@ class OpenCode2:
 
     def describe(self):
         model = "" if "--model" in self.argv else ", your default model"
-        only = ", read-only: edits are denied" if self.read_only else ""
+        only = ", read-only: edits are denied" if not self.edit else ""
         return f"{shlex.join(self.argv)}  (run in DIR, prompt on stdin{model}{only})"
 
     def run(self, prompt, workdir, timeout_s):

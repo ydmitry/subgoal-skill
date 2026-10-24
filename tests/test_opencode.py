@@ -84,9 +84,9 @@ class OpenCodeTest(unittest.TestCase):
         self.assertNotIn("read-only", provider.describe())
         self.assertIn("--dir DIR  (prompt on stdin)", provider.describe())
 
-    def test_O1b_read_only_argv_and_rules(self):
+    def test_O1b_judge_argv_and_rules(self):
         provider = OpenCode(allow=["Edit", "Bash(rm -rf *)"], executable=self.fake([{"stdout": READ_ONLY}]),
-                            read_only=True)
+                            edit=False)
         provider.run("THE PROMPT", self.dir, 60)
         (call,) = self.calls()
         self.assertEqual(call["argv"], ["run", "--format", "json", "--pure", "--dir", str(self.dir)])
@@ -191,7 +191,7 @@ class OpenCodeTest(unittest.TestCase):
         code, out = cli(*here, "--dry-run", "--model", "mock/scripted")
         self.assertEqual(code, 0)
         self.assertIn(f"provider: {OpenCode(model='mock/scripted').describe()}\n", out)
-        self.assertIn(f"judge: {OpenCode(model='mock/scripted', read_only=True).describe()}\n", out)
+        self.assertIn(f"judge: {OpenCode(model='mock/scripted', edit=False).describe()}\n", out)
         self.assertEqual(cli(*here, "--check", "true", "--allow", "Edit")[0], 2)    # Claude Code rules
         self.assertEqual(cli(*here, "--check", "true", "--allow", "Edit", "--provider", "claude-code",
                              "--dry-run")[0], 0)

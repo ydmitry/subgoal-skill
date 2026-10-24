@@ -52,8 +52,8 @@ enforces it. If a change needs more lines, something else should get simpler fir
 
 A provider is a class that satisfies [`subgoal/provider.py`](subgoal/provider.py):
 
-- Its constructor takes `model`, `allow` and `read_only=False`. With `read_only=True`, no
-  session it starts may edit anything, whatever `allow` says; the judge is built this way.
+- Its constructor takes `model`, `allow` and `edit=True`. With `edit=False`, no session it
+  starts may edit anything, whatever `allow` says; the judge is built this way.
 - `describe()` returns one line: the tool, model and permissions every call will use.
 - `run(prompt, workdir, timeout_s)` starts a **new** session in `workdir`, never resumes an
   old one, enforces the timeout, and returns a `Reply`. Anything unusable raises

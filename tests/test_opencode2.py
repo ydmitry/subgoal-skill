@@ -93,8 +93,8 @@ class OpenCode2Test(unittest.TestCase):
         self.assertNotIn("read-only", provider.describe())
         self.assertIn("(run in DIR, prompt on stdin)", provider.describe())
 
-    def test_P1b_read_only_argv_and_rules(self):
-        provider = OpenCode2(allow=["Edit"], executable=self.fake([{"stdout": READ_ONLY}]), read_only=True)
+    def test_P1b_judge_argv_and_rules(self):
+        provider = OpenCode2(allow=["Edit"], executable=self.fake([{"stdout": READ_ONLY}]), edit=False)
         provider.run("THE PROMPT", self.dir, 60)
         (call,) = self.calls()
         self.assertEqual(call["argv"], FLAGS)
@@ -151,7 +151,7 @@ class OpenCode2Test(unittest.TestCase):
 
     def test_P4c_opencode_1_is_refused_before_a_prompt(self):
         provider = OpenCode2(executable=fake_opencode(self.bin, "opencode", [{"stdout": OK}], version="1.19.3\n"),
-                             read_only=True)
+                             edit=False)
         with self.assertRaisesRegex(ProviderError, r"is opencode 1\.19\.3, not opencode 2: for opencode 1\.x "
                                                    r"use --provider opencode$"):
             provider.run("You are a reviewer.", self.dir, 30)
@@ -218,7 +218,7 @@ class OpenCode2Test(unittest.TestCase):
         code, out = cli(*here, "--dry-run", "--model", "mock/scripted")
         self.assertEqual(code, 0)
         self.assertIn(f"provider: {OpenCode2(model='mock/scripted').describe()}\n", out)
-        self.assertIn(f"judge: {OpenCode2(model='mock/scripted', read_only=True).describe()}\n", out)
+        self.assertIn(f"judge: {OpenCode2(model='mock/scripted', edit=False).describe()}\n", out)
         self.assertEqual(cli(*here, "--check", "true", "--allow", "Edit")[0], 2)    # Claude Code rules
         self.assertEqual(list(self.dir.iterdir()), [self.dir / "app.txt"])
         shown = subprocess.run([sys.executable, "-m", "subgoal", "--help"], cwd=ROOT, capture_output=True, text=True)

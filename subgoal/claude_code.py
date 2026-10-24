@@ -20,17 +20,17 @@ READ_ONLY_DENY = ("Bash(*--output*)",)     # `git diff --output=FILE` would writ
 class ClaudeCode:
     """Every call runs the same command, so the permissions are fixed here, once."""
 
-    def __init__(self, model=None, allow=(), executable="claude", read_only=False):
+    def __init__(self, model=None, allow=(), executable="claude", edit=True):
         # -p                       headless, and a new session: no --continue or --resume
         # --output-format json     one result object to parse
         # acceptEdits              file edits and simple file commands, inside the folder only
-        # dontAsk (read_only)      deny everything the allow list does not name
+        # dontAsk (edit=False)     deny everything the allow list does not name
         # --permission-prompts     nobody is there to answer a prompt, so it is denied
-        self.read_only = read_only
-        mode = "dontAsk" if read_only else "acceptEdits"
+        self.edit = edit
+        mode = "acceptEdits" if edit else "dontAsk"
         self.argv = [executable, "-p", "--output-format", "json",
                      "--permission-mode", mode, "--permission-prompts", "none"]
-        if read_only:
+        if not edit:
             # --tools                the edit and write tools do not exist in this session
             # --strict-mcp-config    no MCP tools, which could write outside the folder
             # --disallowedTools      beats the allow list, which `git diff --output=FILE` would slip past
@@ -44,7 +44,7 @@ class ClaudeCode:
 
     def describe(self):
         model = "" if "--model" in self.argv else ", your default model"
-        only = ", read-only: edits are denied" if self.read_only else ""
+        only = ", read-only: edits are denied" if not self.edit else ""
         return f"{shlex.join(self.argv)}  (prompt on stdin{model}{only})"
 
     def run(self, prompt, workdir, timeout_s):

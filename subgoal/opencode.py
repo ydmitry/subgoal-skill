@@ -21,27 +21,27 @@ READ_ONLY_RULES = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow
 class OpenCode:
     """Every call runs the same command with the same config, so the permissions are fixed here, once."""
 
-    def __init__(self, model=None, allow=(), executable="opencode", read_only=False):
+    def __init__(self, model=None, allow=(), executable="opencode", edit=True):
         # run --format json        a new session, one JSON event per line: no --continue or --session
         # OPENCODE_CONFIG_CONTENT  merged over your own config: one agent with the rules above, made
         #                          the default, so no session starts as another agent (a missing
         #                          default agent is an error, not a fallback)
         # allow                    Claude Code rules, unused: the CLI refuses --allow for opencode, and
         #                          the worker may already run any command in the folder, the check too
-        # --pure (read_only)       no plugins, whose code could write
-        self.read_only, self.executable = read_only, executable
+        # --pure (edit=False)     no plugins, whose code could write
+        self.edit, self.executable = edit, executable
         config = {"default_agent": AGENT, "agent": {AGENT: {
-            "mode": "primary", "permission": READ_ONLY_RULES if read_only else WORKER_RULES}}}
+            "mode": "primary", "permission": WORKER_RULES if edit else READ_ONLY_RULES}}}
         self.argv = ["env", "OPENCODE_CONFIG_CONTENT=" + json.dumps(config, separators=(",", ":")),
                      executable, "run", "--format", "json"]
-        if read_only:
+        if not edit:
             self.argv.append("--pure")
         if model:
             self.argv += ["--model", model]
 
     def describe(self):
         model = "" if "--model" in self.argv else ", your default model"
-        only = ", read-only: edits are denied" if self.read_only else ""
+        only = ", read-only: edits are denied" if not self.edit else ""
         return f"{shlex.join(self.argv)} --dir DIR  (prompt on stdin{model}{only})"
 
     def run(self, prompt, workdir, timeout_s):

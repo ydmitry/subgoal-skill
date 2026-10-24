@@ -42,13 +42,13 @@ class ClaudeCodeTest(unittest.TestCase):
         for unsafe in ("dangerously-skip-permissions", "bypassPermissions"):     # safety regression
             self.assertNotIn(unsafe, " ".join(argv) + provider.describe())
 
-    def test_C1b_read_only_argv(self):
+    def test_C1b_judge_argv(self):
         seen = []
 
         def fake_run_process(cmd, cwd, timeout_s, stdin=None):
             seen.append(cmd)
             return 0, OK, "", False
-        provider = ClaudeCode(model="claude-haiku-5-5", allow=["Edit", "Bash(rm -rf *)"], read_only=True)
+        provider = ClaudeCode(model="claude-haiku-5-5", allow=["Edit", "Bash(rm -rf *)"], edit=False)
         with mock.patch.object(claude_code, "run_process", fake_run_process):
             provider.run("THE PROMPT", Path("."), 60)
         argv = seen[0]
