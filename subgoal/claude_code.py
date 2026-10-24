@@ -80,8 +80,8 @@ def parse(exit_code, stdout, stderr):
 
 
 def tool_trace(events):
-    """One line per tool call, in order: the tool and its key argument, each cut at 100 characters,
-    never what it returned. A run of Read, Grep and Glob calls is one `Read xN` line. Past
+    """One line per tool call, in order: the tool and its key argument, each cut at 100 characters
+    (a file path keeps its end, so its file name shows), never what it returned. A run of Read, Grep and Glob calls is one `Read xN` line. Past
     TRACE_CAP characters, the middle goes."""
     lines = []
     for event in events:
@@ -96,7 +96,7 @@ def tool_trace(events):
                 reads = int(lines.pop()[6:]) if lines and lines[-1].startswith("Read x") else 0
                 lines.append(f"Read x{reads + 1}")
             else:
-                lines.append(f"{name} {arg[:100]}".rstrip())
+                lines.append(f"{name} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:100]}".rstrip())
     text, half = "\n".join(lines), TRACE_CAP // 2
     if len(text) <= TRACE_CAP:
         return text

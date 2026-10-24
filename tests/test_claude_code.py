@@ -114,6 +114,10 @@ class ClaudeCodeTest(unittest.TestCase):
         self.assertEqual(tool_trace(events).splitlines(), [
             "Skill tiny", "Read x3", "Task look around", "Agent review it", "Read x1", "Edit /a", "Write /b",
             "Bash echo one " + "x" * 91, "WebFetch", "Read x2"])
+        deep = "/" + "d/" * 80 + "PLAN.md"                              # a path cut from the front would lose its file name
+        trace = tool_trace(tool_calls(("Write", {"file_path": deep}), ("Bash", {"command": "ls " + "z" * 300}))).splitlines()
+        self.assertEqual((trace[0], len(trace[1])), ("Write " + deep[-100:], 105))
+        self.assertTrue(trace[0].endswith("/PLAN.md"))
         self.assertEqual(tool_trace([]), "")
         self.assertEqual(parse(0, OK.replace('"tool_use"', '"no_tool"'), "").trace, "")   # no calls: empty, not None
 
