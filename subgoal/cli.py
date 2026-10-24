@@ -75,7 +75,8 @@ def main(argv=None):
         print(build_prompt(args.goal, args.check, args.protect, ".subgoal/<run-id>/notes.md", "", last))
         if judge:
             print(f"\njudge: {judge.describe()}\n\njudge prompt, after each step:\n")
-            print(judge_prompt(args.goal, args.dir, "<the worker's last words go here>"))
+            print(judge_prompt(args.goal, args.dir, "<the worker's last words go here>",
+                               args.dir / ".subgoal" / "<run-id>"))
         return 0
     limits = Limits(args.max_iterations, args.max_minutes * 60, args.max_tokens)
     run = run_loop(args.goal, args.check, args.dir, provider, limits, args.protect, judge=judge)

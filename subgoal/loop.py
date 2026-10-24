@@ -260,7 +260,7 @@ def _budget(run, time_left):
 def _judge(run, judge, step, time_left):
     """Ask a fresh session with no edit tools if the goal is met. The worker's last words go in as
     a claim. Records NN/judge-prompt.md, judge.md and judge-call.json; raises ProviderError like any call."""
-    prompt, began = judge_prompt(run.goal, run.dir, run.last_words), time.monotonic()
+    prompt, began = judge_prompt(run.goal, run.dir, run.last_words, run.folder), time.monotonic()
     (step / "judge-prompt.md").write_text(prompt)
     run.judge_calls += 1
     reply = judge.run(prompt, run.dir, time_left())

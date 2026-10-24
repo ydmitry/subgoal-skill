@@ -55,6 +55,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("a separate reviewer reads your result against the goal and decides", out)
         self.assertIn("LAST REVIEW (none yet: this is the first step)", out)
         self.assertIn("<the worker's last words go here>", out)             # the judge prompt template
+        self.assertIn(f"in the run folder {self.dir.resolve()}/.subgoal/<run-id>/ is the loop's own record", out)
         self.assertNotIn("pre-check: exit", out)
         self.assertEqual(list(self.dir.iterdir()), [])
 
