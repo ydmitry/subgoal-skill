@@ -111,14 +111,16 @@ The worker's own "I'm done" is printed in the report, but never trusted.
 
 How the worker edits unattended without `--dangerously-skip-permissions`: with the `claude-code`
 provider it runs in Claude Code's `acceptEdits` mode with permission prompts disabled, so it can
-edit files in the folder and run the check command you pass (with no check, any shell command).
-Anything else is denied rather than asked, so a run cannot hang waiting for an answer. The judge
-has no edit tools and may run shell commands in the folder.
+edit files in the folder, run simple file commands there (`mkdir`, `mv`, `cp` and the like),
+and run the check command you pass and your `--allow` rules (with no check, any shell command).
+Anything else is denied rather than asked, so a run cannot hang waiting for an answer. The
+judge has no edit tools and may run shell commands in the folder.
 
 - **It runs a coding agent unattended, as you.** The worker edits files in `--dir` and runs
-  commands there: with a check, that command (any command with opencode); with no check, any
-  command, and the judge runs commands too. They run as you, unsandboxed, in the folder, so in
-  effect they can run any code you can. Work on a clean git tree or a branch you can reset.
+  commands there: with a check, that command and simple file commands (any command with
+  opencode); with no check, any command, and the judge runs commands too. They run as you,
+  unsandboxed, in the folder, so in effect they can run any code you can. Work on a clean git
+  tree or a branch you can reset.
   Hooks and MCP servers in that folder run too.
 - **Never add `--dangerously-skip-permissions`** outside an isolated container with no
   internet access. The project itself never passes it.
@@ -163,7 +165,7 @@ the report at the end. The safety section applies unchanged.
 
 | `--provider` | Runs | Notes |
 |---|---|---|
-| `claude-code` (default) | `claude -p`, a new session per call | The worker edits files and runs only the check you pass (and your `--allow` rules), or, with no check, any shell command. The judge has no edit tools or MCP servers and may run any shell command. |
+| `claude-code` (default) | `claude -p`, a new session per call | The worker edits files, runs simple file commands, the check you pass and your `--allow` rules, or, with no check, any shell command. The judge has no edit tools or MCP servers and may run any shell command. |
 | `opencode` | `opencode run` (opencode 1.x), a new session per call | The worker may run any shell command in the folder. The judge has no edit tools, may run any shell command, and loads no plugins. `--allow` is refused. |
 | `opencode2` | `opencode run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge has no edit tools, may run shell commands under the same rule, and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
 

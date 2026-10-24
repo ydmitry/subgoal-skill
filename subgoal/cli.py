@@ -14,9 +14,9 @@ EPILOG = """exit codes: 0 goal_met | 1 out_of_iterations, out_of_time, out_of_to
             3 provider_failed, protected_file_changed | 130 interrupted
 records:    DIR/.subgoal/<run-id>/
 safety:     the worker edits DIR and runs commands there as you, unsandboxed (claude-code with --check:
-            only the check and your --allow rules). With no --check the judge runs commands too: it
-            has no edit tools, but a command can still change files. Use a clean git tree or a
-            branch, and read the diff."""
+            simple file commands such as mkdir or mv, the check, and your --allow rules). With no
+            --check the judge runs commands too: it has no edit tools, but a command can still
+            change files. Use a clean git tree or a branch, and read the diff."""
 
 
 def parse_args(argv=None):
