@@ -180,7 +180,7 @@ class JudgeLoopTest(unittest.TestCase):
         self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=2, judge=2)    # not met, and no new way to end a run
         self.assertEqual(run.last_verdict, Verdict(False, "The text matches the code.", 2, "the page in a browser"))
         for said in ("GOAL NOT MET (out_of_iterations)", "last verdict after step 2: not met (cannot see)",
-                     "only parts no file can show: the page in a browser", "give the goal a --check"):
+                     "only parts no file can show are left (a model's opinion): the page in a browser", "give the goal a --check"):
             self.assertIn(said, self.printed)
         run = self.go([say(), say()], [blind, judges(False, "app.py never says done")],
                       limits=Limits(max_iterations=2))

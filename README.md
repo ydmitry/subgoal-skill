@@ -142,7 +142,7 @@ the report at the end. The safety section applies unchanged.
 - **Without a check, write done criteria a reader can tick off from the files alone:**
   numbered and observable ("README.md has three sections, in this order"), never "good
   docs", and never "opens without errors": the judge only reads, so that needs a check. If the
-  judge names such parts, the report lists them. See
+  judge's last review names such parts, the report lists them. See
   [`examples/write-the-docs/GOAL.md`](examples/write-the-docs/GOAL.md).
 - **Protect the finish line.** `--protect` the tests, the check script, anything that must not change.
 - **Stuck in a loop?** Add a sign: one line in the goal that says what not to do.
