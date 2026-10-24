@@ -85,6 +85,14 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertFalse(parse_verdict("VERDICT: met\nVERDICT: not met", 1).met)    # only the last line counts
         self.assertTrue(parse_verdict("VERDICT: not met\nVERDICT: met", 1).met)
         self.assertEqual(parse_verdict("", 1).reasons, NO_VERDICT)
+        blind = parse_verdict("The text holds.\nVERDICT: not met, cannot see: a run, a browser\n", 3)
+        self.assertEqual(blind, Verdict(False, "The text holds.", 3, "a run, a browser"))   # the third line
+        self.assertEqual(str(blind), "not met (cannot see)")
+        self.assertEqual(parse_verdict("Holds.\nVERDICT: not met, cannot see:", 1), Verdict(False, "Holds.", 1))
+        self.assertEqual(len(parse_verdict("VERDICT: not met, cannot see: " + "x" * 500, 1).unseen), 300)
+        for reply in ("VERDICT: met, cannot see: x", "Reasons.\nVERDICT: met, cannot see: x"):
+            self.assertFalse(parse_verdict(reply, 1).met)                     # never a road to met
+            self.assertIn(NO_VERDICT, parse_verdict(reply, 1).reasons)
 
     def test_J4_judge_failed(self):
         run = self.go([say(tokens=50)], [fail(ProviderError("login expired"))])
@@ -106,7 +114,7 @@ class JudgeLoopTest(unittest.TestCase):
         saved = json.loads((run.folder / "run.json").read_text())
         self.assertIsNone(saved["check"])
         self.assertEqual(saved["judge"], self.judge.describe())      # run.json says a judge decided
-        self.assertEqual(saved["last_verdict"], {"met": True, "reasons": "fine", "step": 1})
+        self.assertEqual(saved["last_verdict"], {"met": True, "reasons": "fine", "step": 1, "unseen": None})
         self.assertEqual((run.folder / "report.md").read_text(), self.printed)
         for said in ("GOAL MET after step 1: a judge said met", "a model's opinion", "Read the diff",
                      "1 of 5 worker calls (judge calls: 1)", "judge via", "first lines", "fine"):
@@ -146,9 +154,26 @@ class JudgeLoopTest(unittest.TestCase):
             self.assertLess(prompt.index("NOTES FROM EARLIER STEPS"), prompt.index("LAST REVIEW"))
         asked = judge_prompt("the goal", "/some/dir", "I did it")
         for said in ("the goal", "/some/dir", "I did it", "unverified claim", "overclaim", "git diff",
-                     "read-only", "Do not create, edit or delete", "VERDICT: met", "VERDICT: not met"):
+                     "read-only", "Do not create, edit or delete", "VERDICT: met", "VERDICT: not met",
+                     "VERDICT: not met, cannot see: <the parts no file can show", "cannot run"):
             self.assertIn(said, asked)
         self.assertIn("(the worker said nothing)", judge_prompt("g", "/d", None))
+
+    def test_J11_parts_no_file_can_show(self):
+        blind = say("The text matches the code.\nVERDICT: not met, cannot see: the page in a browser")
+        run = self.go([say(), say()], [judges(False, "app.py never says done"), blind],
+                      limits=Limits(max_iterations=2))
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=2, judge=2)    # not met, and no new way to end a run
+        self.assertEqual(run.last_verdict, Verdict(False, "The text matches the code.", 2, "the page in a browser"))
+        for said in ("GOAL NOT MET (out_of_iterations)", "last verdict after step 2: not met (cannot see)",
+                     "only parts no file can show: the page in a browser", "give the goal a --check"):
+            self.assertIn(said, self.printed)
+        run = self.go([say(), say()], [blind, judges(False, "app.py never says done")],
+                      limits=Limits(max_iterations=2))
+        self.assertIn("LAST REVIEW (after step 1: a reviewer's opinion, not a command result)\n"
+                      "The text matches the code.\n", self.worker.prompts[1])
+        self.assertNotIn("VERDICT", self.worker.prompts[1])
+        self.assertNotIn("cannot see", self.printed)                  # only the last verdict is reported
 
 
 if __name__ == "__main__":

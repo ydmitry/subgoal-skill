@@ -315,6 +315,10 @@ def report(run):
         lines = [f"subgoal: GOAL MET {when}: {said}", f"  {caveat} Read the diff."]
     else:
         lines = [f"subgoal: GOAL NOT MET ({run.stop_reason.value})"]
+        if judged and last and last.unseen:
+            lines += [f"  the judge named nothing wrong in the files (a model's opinion), only parts no file "
+                      f"can show: {last.unseen}",
+                      "  Only a command can show those: give the goal a --check, or take them out of it."]
     limit = f"limit {limits.max_tokens:,}" if limits.max_tokens else "no limit set"
     tokens = f"{count(run.tokens)} ({limit}; as reported by the provider)"
     if run.tokens is None and limits.max_tokens:

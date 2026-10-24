@@ -95,7 +95,8 @@ for each step the exact prompt, the reply, and the check output or the judge's r
   Tests make the best checks. Use a check whenever a command can tell.
 - **No `--check`** means a judge decides: one more fresh agent session, read-only, that reads
   the files against your goal and ends its reply with `VERDICT: met` or `VERDICT: not met`
-  (anything else is not met). Its "met" is a model's opinion, and the report says so.
+  (anything else is not met). Its "met" is a model's opinion, and the report says so. When the
+  files hold and only parts no file can show are left, it ends with `VERDICT: not met, cannot see: ...`.
   Try it on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
 - **`--protect PATH`** names files the worker must not touch, such as the tests. If one
   changes, the run stops before anything is checked.
@@ -140,7 +141,8 @@ the report at the end. The safety section applies unchanged.
   compound check (`make test && make lint`) in a script, and `--protect` the script.
 - **Without a check, write done criteria a reader can tick off from the files alone:**
   numbered and observable ("README.md has three sections, in this order"), never "good
-  docs", and never "opens without errors": the judge only reads, so that needs a check. See
+  docs", and never "opens without errors": the judge only reads, so that needs a check. If the
+  judge names such parts, the report lists them. See
   [`examples/write-the-docs/GOAL.md`](examples/write-the-docs/GOAL.md).
 - **Protect the finish line.** `--protect` the tests, the check script, anything that must not change.
 - **Stuck in a loop?** Add a sign: one line in the goal that says what not to do.
