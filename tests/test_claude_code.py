@@ -1,9 +1,12 @@
 """The Claude Code provider: its command line and its parsing. No model calls.
 
-fixtures/claude_ok.json and fixtures/claude_error.json are real outputs of one tiny
-`claude -p --output-format json` call each, pretty-printed, with the session id removed
-and the message uuid replaced by zeros.
+fixtures/claude_ok.jsonl and fixtures/claude_error.jsonl are real outputs of one tiny
+`claude -p --output-format stream-json --verbose` call each (claude-haiku-5-5, Claude Code 2.1.310).
+The ok one was asked to read two files, then use a tiny project skill to write hello.txt.
 The error one is real too: a call made with an impossibly small --max-budget-usd.
+Cleaned for the repo: the session ids removed, the uuids replaced by zeros, the thinking
+signatures emptied, the temp folder replaced by /tmp, the init event cut to a few fields, and
+the hook, rate-limit and thinking-token events left out.
 """
 import json
 import sys
@@ -15,11 +18,23 @@ from unittest import mock
 
 from fake import gone
 from subgoal import claude_code
-from subgoal.claude_code import JUDGE_TOOLS, ClaudeCode, parse
+from subgoal.claude_code import JUDGE_TOOLS, TRACE_CAP, ClaudeCode, parse, tool_trace
 from subgoal.provider import ProviderError
 
 FIXTURES = Path(__file__).parent / "fixtures"
-OK = (FIXTURES / "claude_ok.json").read_text()
+OK = (FIXTURES / "claude_ok.jsonl").read_text()
+RESULT = [json.loads(line) for line in OK.splitlines() if '"type": "result"' in line][-1]
+
+
+def tool_calls(*calls):
+    """A stream of assistant events, one per (name, input) tool call, each followed by its result."""
+    events = []
+    for i, (name, args) in enumerate(calls):
+        events += [{"type": "assistant", "message": {"content": [
+                       {"type": "tool_use", "id": f"t{i}", "name": name, "input": args}]}},
+                   {"type": "user", "message": {"content": [
+                       {"type": "tool_result", "tool_use_id": f"t{i}", "content": "SECRET RESULT"}]}}]
+    return events
 
 
 class ClaudeCodeTest(unittest.TestCase):
@@ -33,7 +48,7 @@ class ClaudeCodeTest(unittest.TestCase):
         with mock.patch.object(claude_code, "run_process", fake_run_process):
             provider.run("THE PROMPT", Path("."), 60)
         argv, stdin = seen[0]
-        self.assertEqual(argv, ["claude", "-p", "--output-format", "json",
+        self.assertEqual(argv, ["claude", "-p", "--output-format", "stream-json", "--verbose",
                                 "--permission-mode", "acceptEdits", "--permission-prompts", "none",
                                 "--model", "claude-haiku-5-5",
                                 "--allowedTools", "Bash(make test)", "Edit"])
@@ -52,7 +67,7 @@ class ClaudeCodeTest(unittest.TestCase):
         with mock.patch.object(claude_code, "run_process", fake_run_process):
             provider.run("THE PROMPT", Path("."), 60)
         argv = seen[0]
-        self.assertEqual(argv, ["claude", "-p", "--output-format", "json",
+        self.assertEqual(argv, ["claude", "-p", "--output-format", "stream-json", "--verbose",
                                 "--permission-mode", "dontAsk", "--permission-prompts", "none",
                                 "--tools", "Read,Grep,Glob,Bash", "--strict-mcp-config",
                                 "--model", "claude-haiku-5-5", "--allowedTools", *JUDGE_TOOLS])
@@ -71,22 +86,71 @@ class ClaudeCodeTest(unittest.TestCase):
         self.assertNotIn("no edit tools", ClaudeCode().describe())
 
     def test_C2_parse_ok(self):
-        self.assertIsNone(parse(0, OK, "").session)       # the fixture has no session id: unknown
-        data = dict(json.loads(OK), **{claude_code.RESUME_ID_KEY: "abc-123"})
-        reply = parse(0, json.dumps(data), "")
-        self.assertEqual((reply.text, reply.session), ("ok", "abc-123"))
-        self.assertEqual(reply.tokens, 2 + 93 + 20233 + 11453)   # input, output, cache writes, reads
-        self.assertAlmostEqual(reply.cost_usd, 0.00420783)
+        reply = parse(0, OK, "")
+        self.assertEqual((reply.text, reply.session), ("done", None))  # the fixture has no session id: unknown
+        self.assertEqual(reply.tokens, 10 + 819 + 21757 + 142464)    # input, output, cache writes, reads
+        self.assertAlmostEqual(reply.cost_usd, 0.00618654)
+        self.assertEqual(reply.trace, "Read x2\nSkill tiny\nBash ls\nWrite /tmp/hello.txt\nBash cat hello.txt")
+        for leaked in ("alpha", "beta", "Before writing any file", "File created", "hi\n"):
+            self.assertNotIn(leaked, reply.trace)                      # results and contents stay out
+        with_id = OK.replace('"type": "result"', f'"{claude_code.RESUME_ID_KEY}": "abc-123", "type": "result"')
+        self.assertEqual(parse(0, with_id, "").session, "abc-123")
+
+    def test_C2b_the_old_single_json_object_still_parses(self):
+        for old in (json.dumps(RESULT), json.dumps(RESULT, indent=2)):   # --output-format json, as before
+            reply = parse(0, old, "")
+            self.assertEqual((reply.text, reply.tokens, reply.trace), ("done", 10 + 819 + 21757 + 142464, None))
+
+    def test_C2c_trace_lines(self):
+        events = tool_calls(("Skill", {"skill": "tiny", "args": "x"}), ("Glob", {"pattern": "*"}),
+                            ("Grep", {"pattern": "p"}), ("Read", {"file_path": "/a"}),
+                            ("Task", {"description": "look around", "prompt": "SECRET PROMPT"}),
+                            ("Agent", {"description": "review it"}), ("Read", {"file_path": "/b"}),
+                            ("Edit", {"file_path": "/a", "old_string": "SECRET", "new_string": "SECRET"}),
+                            ("Write", {"file_path": "/b", "content": "SECRET"}),
+                            ("Bash", {"command": "echo   one\n" + "x" * 200, "description": "SECRET"}),
+                            ("WebFetch", {"url": "https://example.com"}), ("Read", {}), ("Grep", {}))
+        events.insert(1, {"type": "system", "subtype": "init"})          # other events count for nothing
+        self.assertEqual(tool_trace(events).splitlines(), [
+            "Skill tiny", "Read x3", "Task look around", "Agent review it", "Read x1", "Edit /a", "Write /b",
+            "Bash echo one " + "x" * 91, "WebFetch", "Read x2"])
+        self.assertEqual(tool_trace([]), "")
+        self.assertEqual(parse(0, OK.replace('"tool_use"', '"no_tool"'), "").trace, "")   # no calls: empty, not None
+
+    def test_C2d_trace_cap(self):
+        lines = [f"Bash echo {i:04d} " + "x" * 30 for i in range(300)]
+        trace = tool_trace(tool_calls(*[("Bash", {"command": line[5:]}) for line in lines]))
+        self.assertLess(len(trace), TRACE_CAP + 100)
+        head, gap, tail = trace.partition("\n... ")
+        left_out = int(gap and tail.split(" ", 1)[0])
+        tail = tail.split(" lines left out ...\n", 1)[1]
+        self.assertEqual(head.splitlines(), lines[:len(head.splitlines())])          # the first half, whole lines
+        self.assertEqual(tail.splitlines(), lines[-len(tail.splitlines()):])          # the last half
+        self.assertEqual(len(head.splitlines()) + left_out + len(tail.splitlines()), 300)
+        self.assertGreater(len(head), TRACE_CAP // 2 - 50)
+        self.assertGreater(len(tail), TRACE_CAP // 2 - 50)
 
     def test_C3_parse_error_result(self):
-        with self.assertRaisesRegex(ProviderError, r"exit 1\): Reached maximum budget"):
-            parse(1, (FIXTURES / "claude_error.json").read_text(), "")
+        with self.assertRaisesRegex(ProviderError, r"exit 1\): Reached maximum budget \(\$0.0001\)"):
+            parse(1, (FIXTURES / "claude_error.jsonl").read_text(), "")
+        is_error = OK.replace('"is_error": false', '"is_error": true')
+        with self.assertRaisesRegex(ProviderError, r"exit 0\): done"):         # is_error, even with exit 0
+            parse(0, is_error, "")
+        with self.assertRaisesRegex(ProviderError, r"exit 2\): done"):         # a non-zero exit, even with a result
+            parse(2, OK, "")
 
     def test_C4_not_json_or_non_zero_exit(self):
         with self.assertRaisesRegex(ProviderError, "boom"):
             parse(0, "this is not JSON", "boom")
         with self.assertRaisesRegex(ProviderError, "please log in"):
             parse(1, "", "please log in")
+        with self.assertRaisesRegex(ProviderError, r"exit 0\): no output"):
+            parse(0, "", "")
+        no_result = "\n".join(line for line in OK.splitlines() if '"type": "result"' not in line)
+        with self.assertRaisesRegex(ProviderError, "exit 0"):                  # a stream cut before its result
+            parse(0, no_result, "")
+        reply = parse(0, "not JSON\n[1, 2]\n" + OK + "garbage {\n", "")          # stray lines are skipped
+        self.assertEqual((reply.text, reply.trace.splitlines()[0]), ("done", "Read x2"))
 
     def test_C5_executable_not_found(self):
         with self.assertRaisesRegex(ProviderError, "not found"):

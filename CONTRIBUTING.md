@@ -12,7 +12,7 @@ Read in this order:
 | [`subgoal/provider.py`](subgoal/provider.py) | The whole contract between the loop and an agent, about 30 lines. |
 | [`subgoal/loop.py`](subgoal/loop.py) | The loop itself: `run_loop()`, the prompt template, the limits, the stop reasons, the report. |
 | [`subgoal/judge.py`](subgoal/judge.py) | The judge's prompt and the strict parse of its verdict line. |
-| [`subgoal/claude_code.py`](subgoal/claude_code.py) | The `claude -p` command line, its judge variant (no edit tools), and how its JSON becomes a `Reply`. |
+| [`subgoal/claude_code.py`](subgoal/claude_code.py) | The `claude -p` command line, its judge variant (no edit tools), and how its JSON events become a `Reply` with a trace of the tool calls. |
 | [`subgoal/opencode.py`](subgoal/opencode.py) | The same for `opencode run` (opencode 1): permissions as one config, JSON events as a `Reply`. |
 | [`subgoal/opencode2.py`](subgoal/opencode2.py) | opencode 2: another command line and rule format, the same events (it reuses `opencode.parse`). |
 | [`subgoal/cli.py`](subgoal/cli.py) | The arguments, the `PROVIDERS` registry, `--dry-run`. |
@@ -62,6 +62,9 @@ A provider is a class that satisfies [`subgoal/provider.py`](subgoal/provider.py
 - `run(prompt, workdir, timeout_s)` starts a **new** session in `workdir`, never resumes an
   old one, enforces the timeout, and returns a `Reply`. Anything unusable raises
   `ProviderError`. A number the tool does not report is `None`, never 0.
+- `Reply.trace` is optional: one short line per tool call the agent made, in order (the tool and
+  its key argument, never what the call returned), or `None` when you do not report them.
+  `claude_code.py` builds one; the opencode providers leave it `None` for now.
 
 Then register it in `PROVIDERS` in [`subgoal/cli.py`](subgoal/cli.py). The loop does not
 change. [`subgoal/opencode.py`](subgoal/opencode.py) is a good model to copy: permissions

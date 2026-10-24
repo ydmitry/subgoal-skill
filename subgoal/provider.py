@@ -10,6 +10,7 @@ class Reply:
     tokens: int | None = None      # tokens the call used, if the tool reports them
     cost_usd: float | None = None  # the tool's own estimate, if it gives one
     session: str | None = None     # an id to look the call up later, if any
+    trace: str | None = None       # the tool calls the agent made, one short line each, in order
 
 
 class ProviderError(Exception):
@@ -19,7 +20,10 @@ class ProviderError(Exception):
 class Provider(Protocol):
     """A provider's constructor also takes `edit=True`. With False, no session it starts has a
     tool that edits, writes or patches files, though it may run shell commands in the folder,
-    and describe() says so. The judge is one."""
+    and describe() says so. The judge is one.
+
+    Reply.trace is optional: None when the provider does not report the agent's tool calls. Each
+    line names one call and its key argument, never what the call returned."""
 
     def describe(self) -> str:
         """One line: which tool, model and permissions every call will use.
