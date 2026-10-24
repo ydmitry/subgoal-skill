@@ -12,9 +12,10 @@ goal is met or a budget ends. A check command decides, or, with no command, a re
 
 - **Goal:** observable done criteria in a few short lines: what a reader can see in the
   files when it is done, plus any constraint that matters ("without editing the tests").
-- **Check:** when a command can tell (tests, a build, a linter), add `--check`: a shell
-  command or a script (`--check ./check.sh`), run in the project folder, that exits 0 only
-  when the goal holds. Never one that passes trivially. Without it, a judge decides (opinion).
+- **Check:** when a command can tell (tests, a build, a linter), add `--check`: a shell command
+  or a script (`--check ./check.sh`), run in the project folder, that exits 0 only when the
+  goal holds. Never one that passes trivially. Without it, a read-only judge decides: a part
+  only a run shows (it builds, the suite passes) must be in the check or visible in the files.
 - **Protect the finish line:** `--protect` the test files, the check script, or any file the
   work must not change. Put a compound check (`&&`, `|`) in a script. If unclear, ask the user.
 
@@ -49,9 +50,8 @@ step `NN/prompt.md`, `reply.md`, `call.json`, and `check.txt` or `judge.md`.
 
 ## Safety
 
-The loop runs a coding agent unattended, as the user: it edits files in `--dir` and can run
-any code the check runs; hooks and MCP servers in that folder run too. A judge cannot run
-the project's code, so prefer a check when one exists. Use a throwaway copy and read the diff.
+The loop runs a coding agent unattended, as the user: it edits files in `--dir` and can run any
+code the check runs; hooks and MCP servers there run too. Use a throwaway copy; read the diff.
 
 ## Do not
 

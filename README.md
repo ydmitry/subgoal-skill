@@ -135,11 +135,13 @@ the report at the end. The safety section applies unchanged.
 ## Writing a good goal
 
 - **One measurable end state.** "The tests in `test_x.py` pass", not "improve the code".
-- **A check whenever a command can tell.** Exit 0 is the only road to "met". Put a compound
-  check (`make test && make lint`) in a script, and `--protect` the script.
+- **A check whenever a command can tell.** Exit 0 is the only road to "met", and the loop
+  verifies nothing else: a done criterion left out of the check is checked by no one. Put a
+  compound check (`make test && make lint`) in a script, and `--protect` the script.
 - **Without a check, write done criteria a reader can tick off from the files alone:**
   numbered and observable ("README.md has three sections, in this order"), never "good
-  docs". See [`examples/write-the-docs/GOAL.md`](examples/write-the-docs/GOAL.md).
+  docs", and never "opens without errors": the judge only reads, so that needs a check. See
+  [`examples/write-the-docs/GOAL.md`](examples/write-the-docs/GOAL.md).
 - **Protect the finish line.** `--protect` the tests, the check script, anything that must not change.
 - **Stuck in a loop?** Add a sign: one line in the goal that says what not to do.
 
