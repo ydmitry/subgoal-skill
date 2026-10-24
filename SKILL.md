@@ -15,7 +15,7 @@ goal is met or a budget ends. A check command decides; with none, a judge (no ed
   or a script (`--check ./check.sh`), run in the project folder, that exits 0 only when the
   goal holds. Never one that passes trivially. It is the strongest finish line, the only one a
   model cannot talk its way past. Without it, a judge decides: it reads files and may run
-  commands, but has no browser, so a part only a browser or a timing shows needs a check.
+  commands, but has no browser tool, so a part only a browser or a timing shows needs a check.
 - **Protect the finish line:** `--protect` the test files, the check script, or any file the
   work must not change. Put a compound check (`&&`, `|`) in a script. If unclear, ask the user.
 
