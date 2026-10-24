@@ -201,7 +201,8 @@ class JudgeLoopTest(unittest.TestCase):
                      "tool calls, step by step (not the worker's claim); read it when the goal names a skill "
                      "or a way of working.",
                      "one NN/ folder per step, with trace.md in it when the agent reported its tool calls",
-                     "If the goal names a skill, find its SKILL.md (the project's .claude/skills, ~/.claude/skills",
+                     "If the goal names a skill, find its SKILL.md (first /d/.claude/skills/<name>/, a hidden "
+                     "folder; then ~/.claude/skills, the skills folder in $CLAUDE_CONFIG_DIR, plugin folders)",
                      "check that the trace shows the skill was invoked (a Skill line with its name) and that "
                      "the steps it requires happened in the order it requires, and that the result follows its rules.",
                      "A skill that was named but never invoked, or a required step the trace does not show, is not met.",
