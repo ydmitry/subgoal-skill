@@ -50,7 +50,7 @@ class CliTest(unittest.TestCase):
     def test_X3_no_check_means_a_judge(self):
         code, out = self.cli("--dir", str(self.dir), "--goal", "Review the docs.", "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn(f"provider: {ClaudeCode(allow=['Bash']).describe()}\n", out)    # any command, no check
+        self.assertIn(f"provider: {ClaudeCode(allow=['Bash', 'Read']).describe()}\n", out)    # any command, no check
         self.assertIn(f"judge: {ClaudeCode(edit=False).describe()}\n", out)
         self.assertIn("a separate reviewer reads your result against the goal and decides", out)
         self.assertIn("LAST REVIEW (none yet: this is the first step)", out)
@@ -84,8 +84,8 @@ class CliTest(unittest.TestCase):
                 self.assertEqual(self.cli("--dir", str(self.dir), "--goal", "g", *argv)[0], 0)
             worker = run_loop.call_args.args[3]
             return worker.argv[worker.argv.index("--allowedTools") + 1:], worker.argv
-        self.assertEqual(worker_allows()[0], ["Bash"])                          # a judge decides: any command
-        self.assertEqual(worker_allows("--allow", "WebFetch")[0], ["Bash", "WebFetch"])
+        self.assertEqual(worker_allows()[0], ["Bash", "Read"])                  # a judge decides: any command, and it may look at its screenshots
+        self.assertEqual(worker_allows("--allow", "WebFetch")[0], ["Bash", "Read", "WebFetch"])
         allowed, argv = worker_allows("--check", "make test", "--allow", "Bash(npm run lint)")
         self.assertEqual(allowed, ["Bash(make test)", "Bash(npm run lint)"])    # the check and --allow, no more
         self.assertNotIn("Bash", allowed)

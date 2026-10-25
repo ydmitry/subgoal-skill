@@ -1,10 +1,9 @@
 """The judge: the finish line when there is no check command.
 
-After each worker step the loop starts one more fresh agent session, with no edit tools. It reads
-the files, may run commands in the folder (such as the tests), and ends its reply with `VERDICT: met`
-or `VERDICT: not met` (or a third, not-met line that names the parts no file or command can show):
-a model's opinion, which the report says. This file builds the judge's prompt and parses its
-reply; the loop makes the call.
+After each worker step the loop starts a fresh agent session with no edit tools. It reads the files,
+may run commands in the folder, and ends with `VERDICT: met` or `VERDICT: not met` (or a not-met line
+naming the parts no file or command can show): a model's opinion. This file builds its prompt and
+parses its reply; the loop makes the call.
 """
 from dataclasses import dataclass
 
@@ -33,7 +32,9 @@ HOW TO REVIEW
   to change them. Files a command makes as a side effect (caches, build output) are fine. Run
   the tests; do not fix them or anything else.
 - Check every part of the goal as it is written. A part that neither the files nor a command you
-  run shows is not met.
+  run shows is not met, and so is a part you could not confirm. Report every failing part you
+  find, not only the first, and say which parts you checked and which you did not.
+- Run commands in the foreground. A background task starts another turn whose reply replaces yours.
 - You have no browser tool, but a command can drive one if one is installed. For a web page try
   Python Playwright (`python3 -c "import playwright"`) or a headless Chrome or Chromium: open the
   file at phone width (390 px) and at desktop width, list the console and page errors, check for
@@ -46,7 +47,9 @@ HOW TO REVIEW
 - The folder .subgoal/ holds the loop's own records. Do not review it as the work, but NN/trace.md
   in the run folder {records} is the loop's own record of the worker's tool calls, step by step
   (not the worker's claim); read it when the goal names a skill or a way of working. There is one
-  NN/ folder per step, with trace.md in it when the agent reported its tool calls.
+  NN/ folder per step, with trace.md in it when the agent reported its tool calls. A line is cut
+  at 160 characters and a long trace loses its middle ("... N lines left out ..."): never say a
+  step did not happen only because a cut trace does not show it; look in the files.
 - If the goal names a skill, find its SKILL.md (first {workdir}/.claude/skills/<name>/, a hidden
   folder; then ~/.claude/skills, the skills folder in $CLAUDE_CONFIG_DIR, plugin folders) and read
   it; check that the trace shows the skill was invoked (a Skill line with its name) and that the

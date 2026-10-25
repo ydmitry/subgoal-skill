@@ -16,7 +16,7 @@ JUDGE_TOOLS = ("Read", "Grep", "Glob", "Bash")
 # The trace: each tool call's key argument, by tool (others: the name alone). Reads fold into one line.
 TRACE_ARGS = {"Skill": "skill", "Task": "description", "Agent": "description", "Write": "file_path",
               "Edit": "file_path", "Read": "file_path", "Bash": "command"}
-READS, TRACE_CAP = ("Read", "Grep", "Glob"), 4_000
+READS, TRACE_CAP = ("Read", "Grep", "Glob"), 8_000
 
 
 class ClaudeCode:
@@ -80,8 +80,8 @@ def parse(exit_code, stdout, stderr):
 
 
 def tool_trace(events):
-    """One line per tool call, in order: the tool and its key argument, each cut at 100 characters
-    (a file path keeps its end, so its file name shows), never what it returned. A run of Read, Grep
+    """One line per tool call, in order: the tool and its key argument, each cut at 160 characters
+    (a file path at 100, and it keeps its end, so its file name shows), never what it returned. A run of Read, Grep
     and Glob calls is one line naming the files read, `Read: a.md, b.md`. Past TRACE_CAP characters,
     the middle goes."""
     lines = []
@@ -97,7 +97,7 @@ def tool_trace(events):
                 seen = lines.pop()[6:] if lines and lines[-1].startswith("Read:") else ""
                 lines.append(("Read: " + ", ".join(filter(None, [seen, arg.rsplit("/", 1)[-1] if name == "Read" else ""])))[:200].rstrip())
             else:
-                lines.append(f"{name} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:100]}".rstrip())
+                lines.append(f"{name} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:160]}".rstrip())
     text, half = "\n".join(lines), TRACE_CAP // 2
     if len(text) <= TRACE_CAP:
         return text

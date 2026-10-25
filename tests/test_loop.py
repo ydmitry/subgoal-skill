@@ -159,6 +159,17 @@ class LoopTest(unittest.TestCase):
         for prompt in self.fake.prompts:
             self.assertNotIn("trace", prompt)                             # the worker is not told
 
+    def test_L15_later_steps_are_told_the_skills_used(self):
+        traced = lambda trace: lambda workdir: Reply("did some.", trace=trace)
+        run = self.go([traced("Skill tiny\nRead: a.md\nSkill other"), traced("Bash ls"), edit("app.py", "done\n")],
+                      limits=Limits(max_iterations=3))
+        self.ended(run, R.GOAL_MET, 0, calls=3)
+        first, second, third = self.fake.prompts
+        self.assertNotIn("SKILLS EARLIER STEPS USED", first)              # nothing used yet
+        for later in (second, third):                                     # kept from step 1 even when step 2 used none
+            self.assertIn("SKILLS EARLIER STEPS USED: other, tiny. Invoke them again", later)
+            self.assertIn("do not search the disk", later)
+
 
 if __name__ == "__main__":
     unittest.main()

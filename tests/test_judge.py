@@ -194,6 +194,15 @@ class JudgeLoopTest(unittest.TestCase):
             self.assertNotIn(gone, asked)
         self.assertIn("(the worker said nothing)", judge_prompt("g", "/d", None, "/d/.subgoal/r"))
 
+    def test_J13_the_judge_reports_every_failure_and_stays_in_the_foreground(self):
+        asked = " ".join(judge_prompt("Do it", "/d", "done", "/d/.subgoal/r/").split())
+        for said in ("is not met, and so is a part you could not confirm. Report every failing part you find, "
+                     "not only the first, and say which parts you checked and which you did not.",
+                     "Run commands in the foreground. A background task starts another turn whose reply replaces yours.",
+                     "A line is cut at 160 characters and a long trace loses its middle",
+                     "never say a step did not happen only because a cut trace does not show it"):
+            self.assertIn(said, asked)
+
     def test_J12_the_judge_reads_the_trace_for_a_skill(self):
         asked = " ".join(judge_prompt("Use the tiny skill", "/d", "done", "/d/.subgoal/r/").split())
         for said in ("The folder .subgoal/ holds the loop's own records. Do not review it as the work, but "

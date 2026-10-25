@@ -37,7 +37,8 @@ flowchart LR
 ```
 
 Every step is a new session with no memory. What carries over is on disk: the files in the
-folder, the worker's own `notes.md`, and the last check output or judge verdict.
+folder, the worker's own `notes.md`, the last check output or judge verdict, and the names of the skills
+earlier steps invoked (the next step is told to invoke them again; a fresh session knows no skill).
 
 ## Quick start
 
@@ -111,6 +112,8 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   reads the skill's `SKILL.md` and that trace: a skill that was never invoked, or a step it
   requires that the trace does not show, is not met. The trace comes from `claude-code` only for
   now; with opencode there is none, and the judge is told to say it could not see how the work was done.
+  A trace line is cut at 160 characters and a long trace loses its middle, and the judge is told not to
+  count a cut line as proof that a step did not happen.
 - **`--protect PATH`** names files the worker and the judge must not touch, such as the tests.
   If the worker changes one, the run stops before anything is checked; if a command the judge
   runs changes one, the run stops and its verdict does not count.
@@ -122,7 +125,7 @@ The worker's own "I'm done" is printed in the report, but never trusted.
 How the worker edits unattended without `--dangerously-skip-permissions`: with the `claude-code`
 provider it runs in Claude Code's `acceptEdits` mode with permission prompts disabled, so it can
 edit files in the folder, run simple file commands there (`mkdir`, `mv`, `cp` and the like),
-and run the check command you pass and your `--allow` rules (with no check, any shell command).
+and run the check command you pass and your `--allow` rules (with no check, any shell command, and it may read any file, such as its own screenshots).
 Anything else is denied rather than asked, so a run cannot hang waiting for an answer. The
 judge has no edit tools and may run shell commands in the folder.
 
@@ -176,7 +179,7 @@ the report at the end. The safety section applies unchanged.
 
 | `--provider` | Runs | Notes |
 |---|---|---|
-| `claude-code` (default) | `claude -p`, a new session per call | The worker edits files, runs simple file commands, the check you pass and your `--allow` rules, or, with no check, any shell command. The judge has no edit tools or MCP servers and may run any shell command. |
+| `claude-code` (default) | `claude -p`, a new session per call | The worker edits files, runs simple file commands, the check you pass and your `--allow` rules, or, with no check, any shell command and any file read. The judge has no edit tools or MCP servers and may run any shell command. |
 | `opencode` | `opencode run` (opencode 1.x), a new session per call | The worker may run any shell command in the folder. The judge has no edit tools, may run any shell command, and loads no plugins. `--allow` is refused. |
 | `opencode2` | `opencode run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge has no edit tools, may run shell commands under the same rule, and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
 

@@ -61,8 +61,9 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    # the worker may run the check, or, with no check (a judge decides), any command
-    allow = [f"Bash({args.check})" if args.check is not None else "Bash", *args.allow]
+    # the worker may run the check, or, with no check (a judge decides), any command and read any file
+    allow = [f"Bash({args.check})"] if args.check is not None else ["Bash", "Read"]
+    allow += args.allow
     provider = PROVIDERS[args.provider](model=args.model, allow=allow)
     judge = None if args.check is not None else \
         PROVIDERS[args.provider](model=args.judge_model or args.model, edit=False)

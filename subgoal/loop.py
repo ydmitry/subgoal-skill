@@ -119,11 +119,10 @@ def run_check(check, workdir, timeout_s, step=0):
     return CheckResult(None if timed_out else code, (out + err)[-TAIL_CAP:], seconds, step)
 
 
-def build_prompt(goal, check, protect, notes_path, notes, last):
+def build_prompt(goal, check, protect, notes_path, notes, last, skills=()):
     """The same template, in the same order, every step. Built from files, never from chat.
 
-    `last` is the last CheckResult (the pre-check, before step 1), or, with no check
-    command, the last Verdict (None before step 1)."""
+    `last` is the last CheckResult (the pre-check, before step 1) or, with no check, the last Verdict."""
     if len(notes) > NOTES_CAP:
         notes = notes[:NOTES_CAP] + f"\n[... notes cut at {NOTES_CAP:,} characters]"
     new = last is None or last.step == 0
@@ -136,6 +135,9 @@ def build_prompt(goal, check, protect, notes_path, notes, last):
         finish = FINISH_CHECK.format(check=check)
         seen = f"LAST CHECK (after step {last.step}, exit code {last}, last 4,000 characters of output)\n" \
                f"{last.output.strip() or '(no output)'}"
+    if skills:                                  # a fresh session knows no skill unless it is told
+        seen += (f"\n\nSKILLS EARLIER STEPS USED: {', '.join(skills)}. Invoke them again before you change the work "
+                 "(the Skill tool shows where their files are); do not search the disk for them.")
     return PROMPT.format(goal=goal.strip(), finish=finish, protected=", ".join(protect) or "(none)",
                          notes_path=notes_path, last=seen,
                          notes=notes.strip() or ("(none yet: this is the first step)" if new
@@ -196,9 +198,10 @@ def _steps(run, provider, judge, guarded, time_left):
             return StopReason.OUT_OF_TIME
         step, notes = run.folder / f"{i:02d}", run.folder / "notes.md"
         step.mkdir()
+        skills = sorted({s[6:].strip() for t in traces.values() for s in t.splitlines() if s.startswith("Skill ")})
         prompt = build_prompt(run.goal, run.check, run.protect, notes.relative_to(run.dir),
                               notes.read_text() if notes.exists() else "",
-                              run.last_check if judge is None else run.last_verdict)
+                              run.last_check if judge is None else run.last_verdict, skills)
         (step / "prompt.md").write_text(prompt)                     # b: built from files only
         run.steps, began = i, time.monotonic()
         try:

@@ -113,10 +113,10 @@ class ClaudeCodeTest(unittest.TestCase):
         events.insert(1, {"type": "system", "subtype": "init"})          # other events count for nothing
         self.assertEqual(tool_trace(events).splitlines(), [
             "Skill tiny", "Read: a", "Task look around", "Agent review it", "Read: b", "Edit /a", "Write /b",
-            "Bash echo one " + "x" * 91, "WebFetch", "Read:"])           # a run of reads names its files; Grep and Glob add none
+            "Bash echo one " + "x" * 151, "WebFetch", "Read:"])           # a run of reads names its files; Grep and Glob add none
         deep = "/" + "d/" * 80 + "PLAN.md"                              # a path cut from the front would lose its file name
         trace = tool_trace(tool_calls(("Write", {"file_path": deep}), ("Bash", {"command": "ls " + "z" * 300}))).splitlines()
-        self.assertEqual((trace[0], len(trace[1])), ("Write " + deep[-100:], 105))
+        self.assertEqual((trace[0], len(trace[1])), ("Write " + deep[-100:], 165))      # a Bash line keeps 160
         self.assertTrue(trace[0].endswith("/PLAN.md"))
         reads = tool_calls(("Read", {"file_path": "/s/references/planning.md"}), ("Grep", {"pattern": "p"}),
                            ("Read", {"file_path": "/s/references/delivery-gates.md"}), ("Bash", {"command": "ls"}),
