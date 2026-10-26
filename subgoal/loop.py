@@ -56,12 +56,12 @@ You plan the work of a loop of workers on the folder {workdir}. You do not do th
 GOAL
 {goal}
 
-Read the real files; you may run commands that only read or exercise the work. Write a plan, under 80 lines:
+Read the real files, but not .subgoal/ (the loop's own records); you may run commands that only read or exercise the work.
+Plan in under 80 lines, fewer for a small goal. Three parts:
 PARTS: every program, page, feature, control, rule and flow the goal covers, as found in the files.
 SUSPECTED DEFECTS: what looks wrong or untested in each part, with file and line, and the cases workers
 skip (modifier keys, empty or repeated input, a reset from a state with progress, real random values).
-CHECKS: for each part, one line on how to verify it by running it.
-Do not split the goal into phases or steps, and do not say what to do first: the workers choose.
+CHECKS: for each part, one line on how to verify it by running it. Give no phases, steps or order: the workers choose.
 """
 WORKER_PLAN_HEAD = "PLAN (made by a read-only planner before step 1: what to cover and what looks wrong; a guide, not steps)"
 
