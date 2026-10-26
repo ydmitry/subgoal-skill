@@ -7,11 +7,8 @@ GRACE_S = 5   # seconds between SIGTERM (please stop) and SIGKILL (stop now)
 
 
 def run_process(cmd, cwd, timeout_s, stdin=None, shell=False):
-    """Return (exit_code, stdout, stderr, timed_out).
-
-    The child gets its own session, so its whole process group can be stopped:
-    on timeout we stop it and return timed_out=True; on Ctrl+C we stop it and re-raise.
-    """
+    """Return (exit_code, stdout, stderr, timed_out). The child's whole process group is stopped on timeout
+    (timed_out=True) and on Ctrl+C (re-raised)."""
     child = subprocess.Popen(
         cmd, cwd=cwd, shell=shell, start_new_session=True, text=True,
         encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE,

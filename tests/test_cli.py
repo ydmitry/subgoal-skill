@@ -43,7 +43,7 @@ class CliTest(unittest.TestCase):
         ok, here = ["--goal", "g", "--check", "true"], ["--dir", str(self.dir)]
         for argv in (["--dir", "~", *ok], ["--dir", "/", *ok], [*here, "--check", "true"],
                      [*here, *ok, "--goal-file", "f"], [*here, *ok, "--max-iterations", "0"],
-                     [*here, *ok, "--judge-model", "m"]):
+                     [*here, *ok, "--judge-model", "m"], [*here, *ok, "--no-plan"]):
             self.assertEqual(self.cli(*argv)[0], 2, argv)
         self.assertEqual(list(self.dir.iterdir()), [])
 
@@ -58,6 +58,15 @@ class CliTest(unittest.TestCase):
         self.assertIn(f"in the run folder {self.dir.resolve()}/.subgoal/<run-id>/ is the loop's own record", out)
         self.assertNotIn("pre-check: exit", out)
         self.assertEqual(list(self.dir.iterdir()), [])
+
+    def test_X6_the_plan_is_on_with_a_judge_and_off_with_no_plan(self):
+        for argv, plan in (([], True), (["--no-plan"], False)):
+            with mock.patch("subgoal.cli.run_loop") as run_loop:
+                run_loop.return_value.stop_reason = StopReason.GOAL_MET
+                self.assertEqual(self.cli("--dir", str(self.dir), "--goal", "g", *argv)[0], 0)
+            self.assertIs(run_loop.call_args.kwargs["plan"], plan)
+        self.assertIn("plan: a read-only session", self.cli("--dir", str(self.dir), "--goal", "g", "--dry-run")[1])
+        self.assertIn("plan: none (--no-plan)", self.cli("--dir", str(self.dir), "--goal", "g", "--no-plan", "--dry-run")[1])
 
     def test_X4_the_judge_is_built_with_edit_off(self):
         for argv, check, worker_model, judge_model in [

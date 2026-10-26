@@ -1,8 +1,5 @@
-"""The loop: call the agent in fresh sessions until the finish line says met or a budget ends the run.
-
-The finish line is a check command, or, with no command, a judge (judge.py).
-Read this file first. Nothing in it knows which agent sits behind `provider` or `judge`.
-"""
+"""The loop: call the agent in fresh sessions until the finish line (a check command, or a judge) says met
+or a budget ends the run. Read this file first. Nothing in it knows which agent sits behind a provider."""
 import hashlib
 import json
 import sys
@@ -18,6 +15,7 @@ from .provider import Provider, ProviderError
 CHECK_TIMEOUT_S = 600   # a check may take this long, so a run's time can overshoot by one check
 NOTES_CAP = 8_000       # characters of notes.md that go into the prompt
 TAIL_CAP = 4_000        # characters of check output that are kept and go into the prompt
+PLAN_CAP = 6_000        # characters of the plan that go into the prompts
 
 PROMPT = """\
 You are one step in a loop working toward a goal in this folder.
@@ -26,7 +24,7 @@ You start with no memory of earlier steps. What they learned is in the notes bel
 GOAL
 {goal}
 
-FINISH LINE
+{plan}FINISH LINE
 {finish}
 
 RULES
@@ -51,6 +49,21 @@ After you stop, a separate reviewer reads your result against the goal and decid
 You cannot declare it met. The reviewer goes by the real files and the commands it runs, such
 as the tests, not by what you say, and assumes you may have overclaimed: make every part of the
 goal true and visible there. You may run commands in this folder yourself, such as the tests."""
+
+PLAN_PROMPT = """\
+You plan the work of a loop of workers on the folder {workdir}. You do not do the work, and you change no file.
+
+GOAL
+{goal}
+
+Read the real files; you may run commands that only read or exercise the work. Write a plan, under 80 lines:
+PARTS: every program, page, feature, control, rule and flow the goal covers, as found in the files.
+SUSPECTED DEFECTS: what looks wrong or untested in each part, with file and line, and the cases workers
+skip (modifier keys, empty or repeated input, a reset from a state with progress, real random values).
+CHECKS: for each part, one line on how to verify it by running it.
+Do not split the goal into phases or steps, and do not say what to do first: the workers choose.
+"""
+WORKER_PLAN_HEAD = "PLAN (made by a read-only planner before step 1: what to cover and what looks wrong; a guide, not steps)"
 
 
 class StopReason(str, Enum):
@@ -112,17 +125,14 @@ class Run:
 
 
 def run_check(check, workdir, timeout_s, step=0):
-    """Run the user's check command in workdir. Exit code 0 means the goal holds."""
     start = time.monotonic()
     code, out, err, timed_out = run_process(check, workdir, timeout_s, shell=True)
     seconds = round(time.monotonic() - start, 2)
     return CheckResult(None if timed_out else code, (out + err)[-TAIL_CAP:], seconds, step)
 
 
-def build_prompt(goal, check, protect, notes_path, notes, last, skills=()):
-    """The same template, in the same order, every step. Built from files, never from chat.
-
-    `last` is the last CheckResult (the pre-check, before step 1) or, with no check, the last Verdict."""
+def build_prompt(goal, check, protect, notes_path, notes, last, skills=(), plan=""):
+    """The same template every step, built from files, never from chat. `last` is the last CheckResult or Verdict."""
     if len(notes) > NOTES_CAP:
         notes = notes[:NOTES_CAP] + f"\n[... notes cut at {NOTES_CAP:,} characters]"
     new = last is None or last.step == 0
@@ -139,7 +149,7 @@ def build_prompt(goal, check, protect, notes_path, notes, last, skills=()):
         seen += (f"\n\nSKILLS EARLIER STEPS USED: {', '.join(skills)}. Invoke them again before you change the work "
                  "(the Skill tool shows where their files are); do not search the disk for them.")
     return PROMPT.format(goal=goal.strip(), finish=finish, protected=", ".join(protect) or "(none)",
-                         notes_path=notes_path, last=seen,
+                         notes_path=notes_path, last=seen, plan=f"{WORKER_PLAN_HEAD}\n{plan}\n\n" if plan else "",
                          notes=notes.strip() or ("(none yet: this is the first step)" if new
                                                  else "(none: no notes were left)"))
 
@@ -153,11 +163,10 @@ def safe_workdir(path):
 
 
 def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=(),
-             clock=time.monotonic, judge: Provider | None = None):
-    """Run the loop to its end and return the Run. Progress goes to stderr, the report to stdout.
-
-    The finish line is `check`, a command, or else `judge`, a provider built with edit=False.
-    Exactly one."""
+             clock=time.monotonic, judge: Provider | None = None, plan=True):
+    """Run the loop to its end and return the Run (progress to stderr, the report to stdout). The finish line is
+    `check`, a command, or else `judge`, a provider built with edit=False: exactly one. A judge run starts
+    with a plan (plan.md) unless plan is False."""
     if (check is None) == (judge is None):
         raise ValueError("a run needs a check command or a judge: exactly one of them")
     workdir = safe_workdir(workdir)
@@ -175,7 +184,7 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
     guarded = fingerprint(workdir, run.protect)                     # setup: hash every --protect path
     save(run)
     try:
-        run.stop_reason = _steps(run, provider, judge, guarded, time_left)
+        run.stop_reason = _steps(run, provider, judge, guarded, time_left, plan)
     except KeyboardInterrupt:
         run.stop_reason = StopReason.INTERRUPTED
     time_left()
@@ -187,12 +196,13 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
     return run
 
 
-def _steps(run, provider, judge, guarded, time_left):
+def _steps(run, provider, judge, guarded, time_left, planned=False):
     if judge is None:                                               # step 0: the pre-check
         run.last_check = _check(run, 0)
         if run.last_check.exit_code == 0:
             return StopReason.GOAL_MET
     traces = {}                                                     # step: its trace.md, as the loop wrote it
+    plan = _plan(run, judge, time_left) if judge is not None and planned else ""
     for i in range(1, run.limits.max_iterations + 1):
         if time_left() <= 0:                                        # a
             return StopReason.OUT_OF_TIME
@@ -201,7 +211,7 @@ def _steps(run, provider, judge, guarded, time_left):
         skills = sorted({s[6:].strip() for t in traces.values() for s in t.splitlines() if s.startswith("Skill ")})
         prompt = build_prompt(run.goal, run.check, run.protect, notes.relative_to(run.dir),
                               notes.read_text() if notes.exists() else "",
-                              run.last_check if judge is None else run.last_verdict, skills)
+                              run.last_check if judge is None else run.last_verdict, skills, plan)
         (step / "prompt.md").write_text(prompt)                     # b: built from files only
         run.steps, began = i, time.monotonic()
         try:
@@ -217,7 +227,6 @@ def _steps(run, provider, judge, guarded, time_left):
         for old in run.folder.glob("*/trace.md"):                   # the worker can edit the records, so
             old.unlink()                                            # the loop writes back its own copies
         for n, trace in traces.items():
-            (run.folder / f"{n:02d}").mkdir(exist_ok=True)
             (run.folder / f"{n:02d}" / "trace.md").write_text(trace)
         write_json(step / "call.json", dict(asdict(reply), text="(reply.md)", seconds=round(worker_s),
                                             trace=None if reply.trace is None else "(trace.md)"))
@@ -233,7 +242,7 @@ def _steps(run, provider, judge, guarded, time_left):
             if stop := _budget(run, time_left):                     # f: no judge call past a limit
                 return stop
             try:
-                run.last_verdict = _judge(run, judge, step, time_left)
+                run.last_verdict = _judge(run, judge, step, time_left, plan)
             except ProviderError as error:
                 run.error = f"the judge failed: {error}"
                 return StopReason.OUT_OF_TIME if time_left() <= 0 else StopReason.PROVIDER_FAILED
@@ -259,18 +268,15 @@ def _moved(run, guarded, who):
 
 
 def _budget(run, time_left):
-    """The stop reason if a limit is reached, else None."""
     if run.limits.max_tokens and (run.tokens or 0) >= run.limits.max_tokens:
         return StopReason.OUT_OF_TOKENS
     if time_left() <= 0:
         return StopReason.OUT_OF_TIME
 
 
-def _judge(run, judge, step, time_left):
-    """Ask a fresh session with no edit tools if the goal is met. The worker's last words go in as
-    a claim. Records NN/judge-prompt.md, judge.md and judge-call.json (not its own tool calls);
-    raises ProviderError like any call."""
-    prompt, began = judge_prompt(run.goal, run.dir, run.last_words, run.folder), time.monotonic()
+def _judge(run, judge, step, time_left, plan=""):
+    """Ask a fresh no-edit session if the goal is met (NN/judge-prompt.md, judge.md, judge-call.json). May raise ProviderError."""
+    prompt, began = judge_prompt(run.goal, run.dir, run.last_words, run.folder, plan), time.monotonic()
     (step / "judge-prompt.md").write_text(prompt)
     run.judge_calls += 1
     reply = judge.run(prompt, run.dir, time_left())
@@ -279,6 +285,19 @@ def _judge(run, judge, step, time_left):
                                               seconds=round(time.monotonic() - began)))
     run.tokens, run.cost_usd = add(run.tokens, reply.tokens), add(run.cost_usd, reply.cost_usd)
     return parse_verdict(reply.text, run.steps)
+
+
+def _plan(run, planner, time_left):
+    """One read-only session before step 1, recorded as plan.md. A failed call means no plan, not a failed run."""
+    try:
+        reply = planner.run(PLAN_PROMPT.format(goal=run.goal.strip(), workdir=run.dir), run.dir, time_left())
+    except ProviderError as error:
+        print(f"plan failed, going on without one: {error}", file=sys.stderr)
+        return ""
+    (run.folder / "plan.md").write_text(reply.text + "\n")
+    run.tokens, run.cost_usd = add(run.tokens, reply.tokens), add(run.cost_usd, reply.cost_usd)
+    print(f"plan  {count(reply.tokens)} tokens", file=sys.stderr)
+    return reply.text.strip()[:PLAN_CAP]
 
 
 def _check(run, step):
@@ -305,12 +324,10 @@ def fingerprint(workdir, paths):
 
 
 def add(total, value):
-    """Add a reported number to a running total. None means unknown, never 0."""
     return total if value is None else (total or 0) + value
 
 
 def save(run):
-    """Rewrite run.json, so a crash leaves the last known state on disk."""
     write_json(run.folder / "run.json", asdict(run))
 
 
@@ -367,10 +384,8 @@ def report(run):
               f"  provider  {run.provider}"]
     if judged:
         lines.append(f"  judge via {run.judge}")
-    if run.error:
-        lines.append(f"  error     {run.error}")
-    if run.last_words is not None:
-        lines.append(f"  worker's last words (unverified): \"{' '.join(run.last_words.split())[:300]}\"")
+    lines += [f"  error     {run.error}"] if run.error else []
+    lines += [f"  worker's last words (unverified): \"{' '.join(run.last_words.split())[:300]}\""] if run.last_words is not None else []
     detail = last and (last.reasons if judged else last.output)
     if detail and detail.strip():
         lines.append("  judge's reasons (a model's opinion; last lines):" if judged else

@@ -15,7 +15,7 @@ goal is met or a budget ends. A check command decides; with none, a judge (no ed
 - **Check:** when a command can tell (tests, a build), add `--check`: a command or script
   (`--check ./check.sh`), run in the project folder, that exits 0 only when the goal holds (never
   a trivial one): the only finish line a model cannot talk its way past. With none, a judge decides:
-  it reads files, may run commands, can drive a headless browser if installed; a timing needs a check.
+  it reads files, may run commands, can drive a headless browser if installed; a timing needs a check. A read-only plan comes first.
 - **Protect the finish line:** `--protect` the test files, the check script, or any file the
   work must not change. Put a compound check (`&&`, `|`) in a script. If unclear, ask the user.
 
@@ -30,7 +30,7 @@ goal is met or a budget ends. A check command decides; with none, a judge (no ed
 Pass the project folder as an absolute `--dir`, never `$HOME` or `/`. Show the user the dry
 run's provider command(s) and first prompt, and get a yes. Then run it without `--dry-run`, as
 a background command. Options: `--max-iterations N` (default 5), `--max-minutes M` (30),
-`--max-tokens T`, `--model NAME`, `--judge-model NAME` (no `--check`).
+`--max-tokens T`, `--model NAME`, `--judge-model NAME`, `--no-plan` (no `--check`).
 
 ## 3. Read the result
 

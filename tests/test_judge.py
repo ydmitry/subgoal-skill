@@ -31,6 +31,7 @@ class JudgeLoopTest(unittest.TestCase):
     def go(self, steps, verdicts, **kwargs):
         self.worker, self.judge = FakeProvider(steps), FakeProvider(verdicts)
         printed = io.StringIO()
+        kwargs.setdefault("plan", False)                              # the plan has its own tests, J14 on
         with redirect_stdout(printed), redirect_stderr(io.StringIO()):
             run = run_loop("make app.py say done", None, self.dir, self.worker, judge=self.judge, **kwargs)
         self.printed = printed.getvalue()
@@ -240,6 +241,32 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertFalse((run.folder / "02" / "trace.md").exists())
         for n in ("01", "02"):                               # the judge's own tool calls are not kept
             self.assertIsNone(json.loads((run.folder / n / "judge-call.json").read_text())["trace"])
+
+    def test_J14_a_read_only_plan_comes_first_and_both_prompts_carry_it(self):
+        run = self.go([edit("app.py", "done\n")], [say("PARTS: app.py\nSUSPECTED DEFECTS: none yet", tokens=70), judges(True, tokens=30)],
+                      plan=True)
+        self.ended(run, R.GOAL_MET, 0, worker=1, judge=2)             # the judge provider makes the plan, then judges
+        self.assertTrue(self.judge.prompts[0].startswith("You plan the work of a loop of workers"))
+        self.assertIn("GOAL\nmake app.py say done", self.judge.prompts[0])
+        self.assertEqual((run.folder / "plan.md").read_text(), "PARTS: app.py\nSUSPECTED DEFECTS: none yet\n")
+        for prompt in (self.worker.prompts[0], self.judge.prompts[1]):
+            self.assertIn("PARTS: app.py\nSUSPECTED DEFECTS: none yet", prompt)
+        self.assertLess(self.worker.prompts[0].index("PLAN (made"), self.worker.prompts[0].index("FINISH LINE"))
+        self.assertLess(self.judge.prompts[1].index("THE PLAN (made"), self.judge.prompts[1].index("HOW TO REVIEW"))
+        self.assertEqual(run.tokens, 100)                             # the plan's tokens count against the limit too
+
+    def test_J15_no_plan_means_no_plan_call_and_no_plan_text(self):
+        run = self.go([edit("app.py", "done\n")], [judges(True)])
+        self.ended(run, R.GOAL_MET, 0, worker=1, judge=1)
+        self.assertFalse((run.folder / "plan.md").exists())
+        self.assertNotIn("PLAN", self.worker.prompts[0])
+        self.assertNotIn("THE PLAN", self.judge.prompts[0])
+
+    def test_J16_a_failed_plan_call_does_not_fail_the_run(self):
+        run = self.go([edit("app.py", "done\n")], [fail(ProviderError("no answer")), judges(True)], plan=True)
+        self.ended(run, R.GOAL_MET, 0, worker=1, judge=2)
+        self.assertFalse((run.folder / "plan.md").exists())
+        self.assertNotIn("PLAN (made", self.worker.prompts[0])
 
     def test_J11_parts_no_file_or_command_can_show(self):
         blind = say("The text matches the code.\nVERDICT: not met, cannot see: the page in a browser")

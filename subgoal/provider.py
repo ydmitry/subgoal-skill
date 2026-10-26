@@ -18,17 +18,12 @@ class ProviderError(Exception):
 
 
 class Provider(Protocol):
-    """A provider's constructor also takes `edit=True`. With False, no session it starts has a
-    tool that edits, writes or patches files, though it may run shell commands in the folder,
-    and describe() says so. The judge is one.
-
-    Reply.trace is optional: None when the provider does not report the agent's tool calls. Each
-    line names one call and its key argument, never what the call returned."""
+    """The constructor also takes `edit=True`. With False, no session has a tool that edits files, though it
+    may run shell commands, and describe() says so (the judge and the planner). Reply.trace may be None;
+    its lines name one call and its key argument, never what the call returned."""
 
     def describe(self) -> str:
-        """One line: which tool, model and permissions every call will use.
-        Written to run.json and to the report."""
+        """One line: which tool, model and permissions every call uses (run.json and the report)."""
 
     def run(self, prompt: str, workdir: Path, timeout_s: float) -> Reply:
-        """Start a NEW agent session in workdir, give it prompt, wait at most
-        timeout_s, and return its final Reply. Raise ProviderError on failure."""
+        """Start a NEW session in workdir, give it prompt, wait at most timeout_s, return its Reply, or raise ProviderError."""

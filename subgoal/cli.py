@@ -23,32 +23,28 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="python3 -m subgoal", epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Call a coding agent in fresh sessions until --check exits 0 (or, with no --check, "
-                    "a judge says met) or a budget ends.")
+        description="Call a coding agent in fresh sessions until --check exits 0 (or a judge says met) or a budget ends.")
     p.add_argument("--dir", required=True, help="the folder the agent works in (never $HOME or /)")
     goal = p.add_mutually_exclusive_group(required=True)
     goal.add_argument("--goal", metavar="TEXT", help="the goal, as text")
     goal.add_argument("--goal-file", type=Path, metavar="PATH", help="a file that holds the goal")
-    p.add_argument("--check", metavar="CMD",
-                   help="shell command or script run in DIR; 0 = met. Without it, a judge decides: "
-                        "an agent with no edit tools that may run commands in DIR")
+    p.add_argument("--check", metavar="CMD", help="shell command run in DIR; 0 = met. Without it, a judge decides: "
+                   "an agent with no edit tools that may run commands in DIR")
     p.add_argument("--max-iterations", type=int, default=5, metavar="N", help="default 5")
     p.add_argument("--max-minutes", type=float, default=30, metavar="M", help="default 30")
     p.add_argument("--max-tokens", type=int, metavar="T", help="default: no limit")
-    p.add_argument("--protect", action="append", default=[], metavar="PATH",
-                   help="a file or folder, relative to DIR, that must not change (repeatable)")
-    p.add_argument("--allow", action="append", default=[], metavar="RULE",
-                   help="an extra Claude Code permission rule (repeatable; claude-code only)")
+    p.add_argument("--protect", action="append", default=[], metavar="PATH", help="a path in DIR that must not change (repeatable)")
+    p.add_argument("--allow", action="append", default=[], metavar="RULE", help="an extra Claude Code permission rule (repeatable)")
     p.add_argument("--model", metavar="NAME", help="default: the tool's own default (opencode: provider/model)")
     p.add_argument("--judge-model", metavar="NAME", help="model for the judge; default: --model")
     p.add_argument("--provider", choices=PROVIDERS, default="claude-code", help="default claude-code")
-    p.add_argument("--dry-run", action="store_true",
-                   help="print the provider commands and the prompts; no call, no run folder")
+    p.add_argument("--no-plan", action="store_true", help="skip the read-only plan the judge model makes before step 1")
+    p.add_argument("--dry-run", action="store_true", help="print the provider commands and the prompts; no call, no run folder")
     args = p.parse_args(argv)
     if min(args.max_iterations, args.max_minutes, args.max_tokens or 1) <= 0:
         p.error("limits must be above 0: every run is bounded, and there is no 'unlimited'")
-    if args.judge_model and args.check is not None:
-        p.error("--judge-model is for the judge, which runs only when there is no --check")
+    if (args.judge_model or args.no_plan) and args.check is not None:
+        p.error("--judge-model and --no-plan are for the judge, which runs only when there is no --check")
     if args.allow and args.provider != "claude-code":
         p.error("--allow takes Claude Code rules; the opencode worker may already run any command in DIR")
     try:
@@ -75,10 +71,12 @@ def main(argv=None):
         print(f"provider: {provider.describe()}\n\nfirst prompt:\n")
         print(build_prompt(args.goal, args.check, args.protect, ".subgoal/<run-id>/notes.md", "", last))
         if judge:
+            print(f"\nplan: {'none (--no-plan)' if args.no_plan else 'a read-only session of the judge model before step 1'}")
             print(f"\njudge: {judge.describe()}\n\njudge prompt, after each step:\n")
             print(judge_prompt(args.goal, args.dir, "<the worker's last words go here>",
                                args.dir / ".subgoal" / "<run-id>"))
         return 0
     limits = Limits(args.max_iterations, args.max_minutes * 60, args.max_tokens)
-    run = run_loop(args.goal, args.check, args.dir, provider, limits, args.protect, judge=judge)
+    run = run_loop(args.goal, args.check, args.dir, provider, limits, args.protect, judge=judge,
+                   plan=not args.no_plan)
     return run.stop_reason.exit_code

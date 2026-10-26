@@ -104,6 +104,12 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   browser installed, a timing), it ends with
   `VERDICT: not met, cannot see: ...`. In this mode the worker may run any command in the folder too.
   Try it on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
+- **The plan.** With a judge, a read-only session of the judge's model first reads the folder and writes
+  a plan to `plan.md` in the records: the parts the goal covers, suspected defects with file and line, the
+  cases workers tend to skip (modifier keys, empty or repeated input, a reset from a state with progress,
+  real random values), and one way to verify each part. Both the workers and the judge get it. It names no
+  steps and no order. A failed planning call only means no plan; `--no-plan` skips it. With `--check`
+  there is no plan. It costs one extra read-only session per run.
 - **A goal that names a skill** ("use the tiny skill to create hello.txt"), with no `--check`, is
   judged on how the work was done, not only on the result. After each step the loop writes the worker's tool calls
   to `NN/trace.md` in the records, one line per call, in order (`Skill tiny`, `Bash ls`,

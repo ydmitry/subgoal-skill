@@ -1,13 +1,10 @@
-"""The judge: the finish line when there is no check command.
-
-After each worker step the loop starts a fresh agent session with no edit tools. It reads the files,
-may run commands in the folder, and ends with `VERDICT: met` or `VERDICT: not met` (or a not-met line
-naming the parts no file or command can show): a model's opinion. This file builds its prompt and
-parses its reply; the loop makes the call.
-"""
+"""The judge: the finish line when there is no check command. After each step a fresh session with no
+edit tools reads the files, may run commands, and ends with a verdict line: a model's opinion.
+This file builds its prompt and parses its reply; the loop makes the call."""
 from dataclasses import dataclass
 
 CAP = 4_000     # characters of the worker's claim that go to the judge, and of its reasons that come back
+PLAN_HEAD = "THE PLAN (made before the work started: its parts and suspected defects are part of what you cover)"
 MET, NOT_MET = "VERDICT: met", "VERDICT: not met"
 CANNOT_SEE = "VERDICT: not met, cannot see:"     # then the parts of the goal no file or command can show
 NO_VERDICT = "the judge gave no verdict"
@@ -24,7 +21,7 @@ FOLDER
 WHAT THE WORKER SAYS (an unverified claim: the worker may be wrong, or may overclaim)
 {claim}
 
-HOW TO REVIEW
+{plan}HOW TO REVIEW
 - Look at the real files in the folder. Do not take the claim's word for anything.
 - If the folder is a git repository, also run `git status` and `git diff` to see what changed.
 - You may run commands in the folder, such as the project's tests, to check a part of the goal.
@@ -77,19 +74,16 @@ class Verdict:
         return "met" if self.met else "not met (cannot see)" if self.unseen else "not met"
 
 
-def judge_prompt(goal, workdir, claim, records):
-    """The judge's prompt. The claim is the worker's last words, labelled as unverified.
-    `records` is the run folder, .subgoal/<run-id>/, where the worker's NN/trace.md files are."""
+def judge_prompt(goal, workdir, claim, records, plan=""):
+    """The claim is the worker's last words; `records` is the run folder, where the NN/trace.md files are."""
     return PROMPT.format(goal=goal.strip(), workdir=workdir, met=MET, not_met=NOT_MET, cannot_see=CANNOT_SEE,
-                         records=f"{str(records).rstrip('/')}/",
+                         records=f"{str(records).rstrip('/')}/", plan=f"{PLAN_HEAD}\n{plan}\n\n" if plan else "",
                          claim=(claim or "").strip()[:CAP] or "(the worker said nothing)")
 
 
 def parse_verdict(text, step):
-    """Read the verdict from the last non-empty line, and from nowhere else.
-    A reply with no such line is NOT met, whatever it says: silence never counts as success.
-    Its text is kept (the end of it, if long) with a note that the verdict line is missing.
-    The third line is not met too; it keeps the parts the judge named (none named: plain not met)."""
+    """The verdict is the last non-empty line, nowhere else. No such line is NOT met, whatever the text says.
+    The third line is not met too, and keeps the parts the judge named."""
     lines = text.strip().splitlines()
     last = lines[-1].strip() if lines else ""
     unseen = last[len(CANNOT_SEE):].strip()[:300] if last.startswith(CANNOT_SEE) else None

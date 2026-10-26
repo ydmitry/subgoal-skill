@@ -193,7 +193,7 @@ class OpenCode2Test(unittest.TestCase):
 
     def test_P7_cli_with_a_judge(self):
         self.fake([{"write": {"app.txt": "done\n"}, "stdout": OK}, {"stdout": JUDGE}])
-        code, out = self.subgoal()
+        code, out = self.subgoal("--no-plan")
         self.assertEqual(code, 0, out)                       # the recorded judge said met
         self.assertIn("GOAL MET after step 1: a judge said met", out)
         self.assertIn("app.txt says done.", out)            # the judge's reasons, from its real reply

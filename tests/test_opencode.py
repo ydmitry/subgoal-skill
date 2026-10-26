@@ -168,7 +168,7 @@ class OpenCodeTest(unittest.TestCase):
 
     def test_O8_cli_with_a_judge(self):
         self.fake([{"write": {"app.txt": "done\n"}, "stdout": OK}, {"stdout": JUDGE}])
-        code, out = self.subgoal()
+        code, out = self.subgoal("--no-plan")
         self.assertEqual(code, 0, out)
         self.assertIn("GOAL MET after step 1: a judge said met", out)
         self.assertIn("tokens    1,210 (", out)                         # the worker's 440 and the judge's 770
