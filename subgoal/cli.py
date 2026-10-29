@@ -10,41 +10,43 @@ from .opencode2 import OpenCode2
 
 PROVIDERS = {"claude-code": ClaudeCode, "opencode": OpenCode, "opencode2": OpenCode2}   # one entry each
 
-EPILOG = """exit codes: 0 goal_met | 1 out_of_iterations, out_of_time, out_of_tokens | 2 bad arguments
+EPILOG = """exit codes: 0 goal_met, unchecked | 1 out_of_iterations, out_of_time, out_of_tokens | 2 bad arguments
             3 provider_failed, protected_file_changed | 130 interrupted
 records:    DIR/.subgoal/<run-id>/
 safety:     the worker edits DIR and runs commands there as you, unsandboxed (claude-code with --check:
             simple file commands such as mkdir or mv, the check, and your --allow rules). With no
-            --check the judge runs commands too: it has no edit tools, but a command can still
-            change files. Use a clean git tree or a branch, and read the diff."""
+            --check the planner and the judge run commands too: they have no edit tools, but a command
+            can still change files. Use a clean git tree or a branch, and read the diff."""
 
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="python3 -m subgoal", epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Call a coding agent in fresh sessions until --check exits 0 (or a judge says met) or a budget ends.")
+        description="Call a coding agent in fresh sessions until --check exits 0 (or --judge says met) or a budget ends.")
     p.add_argument("--dir", required=True, help="the folder the agent works in (never $HOME or /)")
     goal = p.add_mutually_exclusive_group(required=True)
     goal.add_argument("--goal", metavar="TEXT", help="the goal, as text")
     goal.add_argument("--goal-file", type=Path, metavar="PATH", help="a file that holds the goal")
-    p.add_argument("--check", metavar="CMD", help="shell command run in DIR; 0 = met. Without it, a judge decides: "
-                   "an agent with no edit tools that may run commands in DIR")
+    p.add_argument("--check", metavar="CMD", help="shell command run in DIR; 0 = met. Without it (and without --judge) "
+                   "one planned step runs and nothing verifies it")
+    p.add_argument("--judge", action="store_true", help="no --check: a judge (an agent with no edit tools that may run "
+                   "commands in DIR) decides after each step; its 'met' is an opinion")
     p.add_argument("--max-iterations", type=int, default=5, metavar="N", help="default 5")
     p.add_argument("--max-minutes", type=float, default=30, metavar="M", help="default 30")
     p.add_argument("--max-tokens", type=int, metavar="T", help="default: no limit")
     p.add_argument("--protect", action="append", default=[], metavar="PATH", help="a path in DIR that must not change (repeatable)")
     p.add_argument("--allow", action="append", default=[], metavar="RULE", help="an extra Claude Code permission rule (repeatable)")
     p.add_argument("--model", metavar="NAME", help="default: the tool's own default (opencode: provider/model)")
-    p.add_argument("--judge-model", metavar="NAME", help="model for the judge; default: --model")
+    p.add_argument("--judge-model", metavar="NAME", help="model for the judge and the plan; default: --model")
     p.add_argument("--provider", choices=PROVIDERS, default="claude-code", help="default claude-code")
-    p.add_argument("--no-plan", action="store_true", help="skip the read-only plan the judge model makes before step 1")
+    p.add_argument("--no-plan", action="store_true", help="skip the read-only plan made before step 1 (no --check)")
     p.add_argument("--dry-run", action="store_true", help="print the provider commands and the prompts; no call, no run folder")
     args = p.parse_args(argv)
     if min(args.max_iterations, args.max_minutes, args.max_tokens or 1) <= 0:
         p.error("limits must be above 0: every run is bounded, and there is no 'unlimited'")
-    if (args.judge_model or args.no_plan) and args.check is not None:
-        p.error("--judge-model and --no-plan are for the judge, which runs only when there is no --check")
+    if (args.judge or args.judge_model or args.no_plan) and args.check is not None:
+        p.error("--judge, --judge-model and --no-plan are for runs with no --check")
     if args.allow and args.provider != "claude-code":
         p.error("--allow takes Claude Code rules; the opencode worker may already run any command in DIR")
     try:
@@ -57,26 +59,24 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    # the worker may run the check, or, with no check (a judge decides), any command and read any file
-    allow = [f"Bash({args.check})"] if args.check is not None else ["Bash", "Read"]
+    allow = [f"Bash({args.check})"] if args.check is not None else ["Bash", "Read"]     # no check: any command
     allow += args.allow
     provider = PROVIDERS[args.provider](model=args.model, allow=allow)
-    judge = None if args.check is not None else \
-        PROVIDERS[args.provider](model=args.judge_model or args.model, edit=False)
+    readonly = None if args.check is not None else PROVIDERS[args.provider](model=args.judge_model or args.model, edit=False)
+    judge = readonly if args.judge else None
     if args.dry_run:
-        last = None if judge else run_check(args.check, args.dir, CHECK_TIMEOUT_S)
-        print("DRY RUN: no agent call, no run folder. " + ("There is no check, so a judge decides after "
-              "each step, and there is no pre-check." if judge else
-              f"Your check ran once as the pre-check: exit {last}"))
+        last = None if readonly else run_check(args.check, args.dir, CHECK_TIMEOUT_S)
+        print("DRY RUN: no agent call, no run folder." + ("" if readonly else f" Your check ran once as the pre-check: exit {last}"))
         print(f"provider: {provider.describe()}\n\nfirst prompt:\n")
-        print(build_prompt(args.goal, args.check, args.protect, ".subgoal/<run-id>/notes.md", "", last))
+        print(build_prompt(args.goal, args.check, args.protect, ".subgoal/<run-id>/notes.md", "", last, judged=bool(judge)))
+        if readonly:
+            print(f"\nplan: {'none (--no-plan)' if args.no_plan else 'a read-only session before step 1'}")
         if judge:
-            print(f"\nplan: {'none (--no-plan)' if args.no_plan else 'a read-only session of the judge model before step 1'}")
             print(f"\njudge: {judge.describe()}\n\njudge prompt, after each step:\n")
             print(judge_prompt(args.goal, args.dir, "<the worker's last words go here>",
                                args.dir / ".subgoal" / "<run-id>"))
         return 0
-    limits = Limits(args.max_iterations, args.max_minutes * 60, args.max_tokens)
+    limits = Limits(args.max_iterations if readonly is None or judge else 1, args.max_minutes * 60, args.max_tokens)
     run = run_loop(args.goal, args.check, args.dir, provider, limits, args.protect, judge=judge,
-                   plan=not args.no_plan)
+                   plan=None if args.no_plan else readonly)
     return run.stop_reason.exit_code

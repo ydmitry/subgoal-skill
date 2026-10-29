@@ -29,7 +29,7 @@ On names: the repo is `subgoal-skill`; the program and the skill are both called
 ```mermaid
 flowchart LR
     G([goal]) --> W["worker: a fresh agent session edits the folder"]
-    W --> C{"check command, or a judge"}
+    W --> C{"check command (or --judge)"}
     C -- met --> M([goal met, exit 0])
     C -- not met --> B{budget left?}
     B -- yes --> W
@@ -91,26 +91,33 @@ Everything the run did is in that `records` folder: `run.json`, the worker's `no
 for each step the exact prompt, the reply, the check output or the judge's reply, and (with
 `claude-code`) `trace.md`, the worker's tool calls.
 
-## Who says "done": a check or a judge
+## Who says "done": a check, nobody, or a judge
 
 - **`--check CMD`** is a shell command the loop runs after every step. Exit 0 means met.
-  Tests make the best checks. Use a check whenever a command can tell.
-- **No `--check`** means a judge decides: one more fresh agent session with no edit tools. It
+  Tests make the best checks. Use a check whenever a command can tell. This is the only mode that loops
+  on something a model cannot talk its way past.
+- **No `--check`** (the default) runs a read-only plan and **one** worker step, then ends as
+  `unchecked` (exit 0): nothing verified the result, so run the tests and read the diff yourself. The worker is
+  told that nothing checks it and to keep testing its own change until it finds no more problems. Why no loop:
+  in my tests a loop whose finish line was a model's opinion did not beat this. On five hard bug-fix tasks with
+  Haiku, five runs each, a plan plus one call passed the hidden tests in 9 of 25 runs, one plain call in 3, and
+  a loop with a Haiku judge in 2: the judge said "met" to most wrong fixes. A tiny sample, not a benchmark.
+- **`--judge`** (with no `--check`) loops on a judge instead: one more fresh agent session with no edit tools. It
   reads the files against your goal, may run commands in the folder (your tests, a script,
   `node` or `python`) to check a part, and ends its reply with `VERDICT: met` or
   `VERDICT: not met` (anything else is not met). Its "met" is a model's opinion, and the report
   says so. It has no browser tool, but it tries Playwright or a headless Chrome from the shell for a web page.
-  When everything files and commands can show holds and only parts neither can show are left (no
-  browser installed, a timing), it ends with
-  `VERDICT: not met, cannot see: ...`. In this mode the worker may run any command in the folder too.
-  Try it on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
-- **The plan.** With a judge, a read-only session of the judge's model first reads the folder and writes
+  In this mode the worker may run any command in the folder too.
+  Try it with `--judge` on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
+  It is useful for checking *how* the work was done (below), less for whether the work is correct.
+- **The plan.** With no `--check`, a read-only session of the judge model (`--judge-model`, else `--model`) first
+  reads the folder and writes
   a plan to `plan.md` in the records: the parts the goal covers, suspected defects with file and line, the
   cases workers tend to skip (modifier keys, empty or repeated input, a reset from a state with progress,
-  real random values), and one way to verify each part. Both the workers and the judge get it. It names no
-  steps and no order. A failed planning call only means no plan; `--no-plan` skips it. With `--check`
-  there is no plan. It costs one extra read-only session per run.
-- **A goal that names a skill** ("use the tiny skill to create hello.txt"), with no `--check`, is
+  real random values), and one way to verify each part. Only the worker gets it; the judge goes by the goal
+  and the files. It names no steps and no order. A failed planning call only means no plan; `--no-plan` skips it.
+  With `--check` there is no plan. It costs one extra read-only session per run.
+- **A goal that names a skill** ("use the tiny skill to create hello.txt"), with `--judge`, is
   judged on how the work was done, not only on the result. After each step the loop writes the worker's tool calls
   to `NN/trace.md` in the records, one line per call, in order (`Skill tiny`, `Bash ls`,
   `Write /path/hello.txt`, a run of reads as one line naming the files, `Read: planning.md, gates.md`), never what a call returned. The worker
@@ -133,7 +140,7 @@ provider it runs in Claude Code's `acceptEdits` mode with permission prompts dis
 edit files in the folder, run simple file commands there (`mkdir`, `mv`, `cp` and the like),
 and run the check command you pass and your `--allow` rules (with no check, any shell command, and it may read any file, such as its own screenshots).
 Anything else is denied rather than asked, so a run cannot hang waiting for an answer. The
-judge has no edit tools and may run shell commands in the folder.
+planner and the judge have no edit tools and may run shell commands in the folder.
 
 - **It runs a coding agent unattended, as you.** The worker edits files in `--dir` and runs
   commands there: with a check, that command and simple file commands (any command with
@@ -172,12 +179,11 @@ the report at the end. The safety section applies unchanged.
 - **A check whenever a command can tell.** Exit 0 is the only road to "met", and the loop
   verifies nothing else: a done criterion left out of the check is checked by no one. Put a
   compound check (`make test && make lint`) in a script, and `--protect` the script.
-- **Without a check, write done criteria the judge can tick off from the files or from a
+- **Without a check, and with `--judge`, write done criteria the judge can tick off from the files or from a
   command it runs:** numbered and observable ("README.md has three sections, in this order",
   "`npm test` passes"), never "good docs". "The page opens in a browser without errors" works if a headless browser is
   installed (the judge tries Playwright or Chrome); without one it needs a check that drives a
-  browser. If the judge's last review names parts it could not show, the report lists them. See
-  [`examples/write-the-docs/GOAL.md`](examples/write-the-docs/GOAL.md).
+  browser. See [`examples/write-the-docs/GOAL.md`](examples/write-the-docs/GOAL.md).
 - **Protect the finish line.** `--protect` the tests, the check script, anything that must not change.
 - **Stuck in a loop?** Add a sign: one line in the goal that says what not to do.
 
@@ -201,6 +207,7 @@ Every run ends with exactly one named stop reason and an exit code:
 | Stop reason | Meaning | Exit code |
 |---|---|---|
 | `goal_met` | The check exited 0, or the judge said met. | 0 |
+| `unchecked` | No `--check` and no `--judge`: one planned step ran and nothing verified it. | 0 |
 | `out_of_iterations` | All N worker calls were made (default 5). | 1 |
 | `out_of_time` | The wall-clock limit was reached (default 30 minutes). | 1 |
 | `out_of_tokens` | The `--max-tokens` limit was reached. | 1 |

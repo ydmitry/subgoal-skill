@@ -193,7 +193,7 @@ class OpenCode2Test(unittest.TestCase):
 
     def test_P7_cli_with_a_judge(self):
         self.fake([{"write": {"app.txt": "done\n"}, "stdout": OK}, {"stdout": JUDGE}])
-        code, out = self.subgoal("--no-plan")
+        code, out = self.subgoal("--judge", "--no-plan")
         self.assertEqual(code, 0, out)                       # the recorded judge said met
         self.assertIn("GOAL MET after step 1: a judge said met", out)
         self.assertIn("app.txt says done.", out)            # the judge's reasons, from its real reply
@@ -213,7 +213,7 @@ class OpenCode2Test(unittest.TestCase):
                 except SystemExit as stop:
                     return stop.code, out.getvalue()
         here = ["--dir", str(self.dir), "--goal", "g", "--provider", "opencode2"]
-        code, out = cli(*here, "--dry-run", "--model", "mock/scripted")
+        code, out = cli(*here, "--judge", "--dry-run", "--model", "mock/scripted")
         self.assertEqual(code, 0)
         self.assertIn(f"provider: {OpenCode2(model='mock/scripted').describe()}\n", out)
         self.assertIn(f"judge: {OpenCode2(model='mock/scripted', edit=False).describe()}\n", out)
