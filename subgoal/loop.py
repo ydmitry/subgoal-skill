@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 
-from .judge import Verdict, judge_prompt, parse_verdict
+from .judge import CAP, Verdict, judge_prompt, parse_verdict
 from .process import run_process
 from .provider import Provider, ProviderError
 
@@ -161,8 +161,8 @@ def build_prompt(goal, check, protect, notes_path, notes, last, skills=(), plan=
     new = last is None or last.step == 0
     if check is None:
         finish = FINISH_JUDGE                           # with no check, only a judged run gets here
-        seen = "LAST REVIEW (none yet: this is the first step)" if new else \
-            f"LAST REVIEW (after step {last.step}: a reviewer's opinion, not a command result)\n{last.reasons}"
+        seen = "LAST REVIEW (none yet: this is the first step)" if new else "LAST REVIEW " \
+            f"(after step {last.step}: a reviewer's opinion, not a command result; at most its last {CAP:,} characters)\n{last.reasons}"
     else:
         finish = FINISH_CHECK.format(check=check)
         seen = f"LAST CHECK (after step {last.step}, exit code {last}, last 4,000 characters of output)\n" \

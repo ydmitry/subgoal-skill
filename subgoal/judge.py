@@ -29,6 +29,8 @@ HOW TO REVIEW
   every one you can, not a sample. Run each worked example, number and output it shows, with commands that change nothing, and read
   the material for each claim about how it behaves. A fact that is false, or that neither the material nor the goal supports, is a
   failing part.
+- If the goal names a document's reader, read it as that reader, with only the page: a point the goal asks for that this reader
+  cannot follow, for a missing why or how or a term not yet explained, fails. Beyond that, add no demand the goal does not make.
 - Run commands in the foreground. A background task starts another turn whose reply replaces yours.
 - You have no browser tool, but a command can drive one if one is installed. For a web page try Python Playwright
   (`python3 -c "import playwright"`) or a headless Chrome or Chromium: open the file at phone width (390 px) and at desktop
@@ -51,7 +53,7 @@ YOUR REPLY
 Give short reasons that name what is missing, or what shows each part holds. For a document that states facts, first list each fact
 you checked, one per line: true, false or unsupported, with the file:line or command. Include the general rules its prose states
 (never, always, only, every, cannot, because), testing each against the code or data: one counterexample makes a rule false. End with
-each failing part on one line, right before the verdict line.
+each failing part on a line of its own, saying what is wrong and its file:line or command, right before the verdict line.
 Your last line must be exactly one of these lines, with nothing after it:
 {met}
 {not_met}
@@ -64,8 +66,7 @@ class Verdict:
     reasons: str     # what the judge said before its verdict line; with none, its reply and a note
     step: int        # the worker step it judged
 
-    def __str__(self):
-        return "met" if self.met else "not met"
+    def __str__(self): return "met" if self.met else "not met"                 # noqa: E704
 
 
 def judge_prompt(goal, workdir, claim, records):
@@ -76,8 +77,7 @@ def judge_prompt(goal, workdir, claim, records):
 
 def parse_verdict(text, step):
     """The verdict is the last non-empty line, nowhere else. No such line is NOT met, whatever the text says."""
-    lines = text.strip().splitlines()
-    last = lines[-1].strip() if lines else ""
+    last = lines[-1].strip() if (lines := text.strip().splitlines()) else ""
     if last not in (MET, NOT_MET):
         return Verdict(False, f"{text.strip()[-CAP:]}\n[{NO_VERDICT} on its last line]" if lines else NO_VERDICT, step)
     reasons = "\n".join(lines[:-1]).strip() or "(the judge gave no reasons)"

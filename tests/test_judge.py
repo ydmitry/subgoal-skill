@@ -63,7 +63,7 @@ class JudgeLoopTest(unittest.TestCase):
         self.ended(run, R.GOAL_MET, 0, worker=2, judge=2)
         first, second = self.worker.prompts
         self.assertIn("LAST REVIEW (none yet: this is the first step)", first)
-        self.assertIn("LAST REVIEW (after step 1: a reviewer's opinion, not a command result)\n"
+        self.assertIn("LAST REVIEW (after step 1: a reviewer's opinion, not a command result; at most its last 4,000 characters)\n"
                       "app.py never says done", second)
         self.assertNotIn("LAST CHECK", second)
         self.assertNotIn("first try", second)                          # fresh context: no earlier reply
@@ -325,9 +325,25 @@ class JudgeLoopTest(unittest.TestCase):
                       "unsupported, with the file:line or command.", asked)
         self.assertIn("Include the general rules its prose states (never, always, only, every, cannot, because), testing each "
                       "against the code or data: one counterexample makes a rule false.", asked)
-        self.assertIn("End with each failing part on one line, right before the verdict line.", asked)   # the worker sees the end
         self.assertIn("material in the folder (a page, a report), each fact is part of the goal", asked)
         self.assertLess(asked.index("first list each fact you checked"), asked.index("Your last line must be"))
+
+    def test_J20_a_document_for_a_named_reader_is_read_as_that_reader(self):
+        asked = " ".join(judge_prompt("Explain it to a new contributor", "/d", "done", "/d/.subgoal/r/").split())
+        rule = ("- If the goal names a document's reader, read it as that reader, with only the page: a point the goal asks for "
+                "that this reader cannot follow, for a missing why or how or a term not yet explained, fails. Beyond that, add "
+                "no demand the goal does not make.")
+        self.assertIn(rule + " - ", asked)                               # the whole bullet: nothing after it takes it back
+        self.assertLess(asked.index(rule), asked.index("YOUR REPLY"))
+        end = "End with each failing part on a line of its own, saying what is wrong and its file:line or command, right before"
+        self.assertLess(asked.index("YOUR REPLY"), asked.index(end))
+
+    def test_J21_the_worker_sees_the_review_s_last_4000_characters(self):
+        run = self.go([say("first try"), say("second try")], [judges(False, "HEAD " + "x" * 5000 + " TAIL"), judges(True)])
+        self.ended(run, R.GOAL_MET, 0, worker=2, judge=2)
+        second = self.worker.prompts[1]
+        self.assertIn("at most its last 4,000 characters)\n" + "x" * 3995 + " TAIL", second)
+        self.assertNotIn("HEAD", second)
 
 
 if __name__ == "__main__":
