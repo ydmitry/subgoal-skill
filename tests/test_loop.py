@@ -5,7 +5,7 @@ Every stop reason has at least one test:
     stop reason              exit  tests
     goal_met                 0     L2, L13
     check_already_passes     2     L1 (at the pre-check: no step runs)
-    out_of_iterations        1     L3, L4, L8, L12, L18, L19 (a failed re-plan), L24 (no planner)
+    out_of_iterations        1     L3, L4, L8, L12, L18, L19 (a failed re-plan), L24 (no planner), L25 (no re-plan left)
     stuck                    1     L16, L17b, L19, L24 (the step after a re-plan failed the same way)
     out_of_time              1     L6, L6b (the provider ran out of time)
     out_of_tokens            1     L7, L20 (no re-plan past a limit), L20b (no step after one that crossed it)
@@ -270,6 +270,22 @@ class LoopTest(unittest.TestCase):
         (self.dir / "app.py").write_text("todo\n")
         run = self.go([say()] * 4, limits=Limits(max_iterations=4))       # no planner, no re-plan, no stuck stop
         self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=4)
+
+    def test_L25_no_re_plan_after_the_last_step(self):
+        run = self.replan([say(), say(), edit("app.py", "try 1\n"), say()], [say("P1"), say("P2")],
+                          limits=Limits(max_iterations=4))
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=4)                # steps 3 and 4 failed alike, but no step is left
+        self.assertEqual((len(self.planner.prompts), run.replans), (1, 1))
+
+    def test_L26_a_different_exit_code_is_a_different_failure(self):
+        a, b = loop.CheckResult(1, "FAILED x\n", 0.1, 1), loop.CheckResult(2, "FAILED x\n", 0.1, 2)
+        self.assertFalse(loop.same_failure(a, b))
+        self.assertTrue(loop.same_failure(a, loop.CheckResult(1, "FAILED x\n", 0.2, 2)))
+
+    def test_L27_the_re_plan_reads_the_workers_notes(self):
+        self.replan([notes("tried app.py; the check wants the word done"), say(), say()], [say("P")],
+                    limits=Limits(max_iterations=3))
+        self.assertIn("tried app.py; the check wants the word done", self.planner.prompts[0])
 
     def test_L20_no_re_plan_past_a_limit(self):
         run = self.replan([say(tokens=600)] * 3, [say("P")], limits=Limits(max_iterations=3, max_tokens=1000))

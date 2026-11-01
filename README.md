@@ -111,8 +111,8 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   the time ends the run before the next step, and a failed re-plan call keeps the last plan. `--no-plan` turns it
   off. If the step that got the new plan fails the same way again, the plan did not help and the run ends as
   `stuck` (exit 1) instead of spending the rest of the budget; a failed re-plan call made no new plan, so it
-  does not count. A second re-plan needs the failure to change first, so with the default 4 worker calls there
-  is at most one; the report counts them. Any number with a time unit counts as a timing, and any clock
+  does not count, and the next time two steps in a row fail the same way it asks again. A second plan needs the
+  failure to change first, so with the default 4 worker calls there is at most one; the report counts them. Any number with a time unit counts as a timing, and any clock
   time or date is taken out, so two failures that differ only in one (`took 350ms`, then `took 300ms`) count as
   the same: the price is a re-plan, or a `stuck` stop, that was not needed. When a run ends with the check failing the way it did
   after an earlier step, by the same rule, the report's check line says so: `exit 2, the same failure since the
