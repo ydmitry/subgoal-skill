@@ -34,6 +34,7 @@ flowchart LR
     C -- not met --> B{budget left?}
     B -- yes --> W
     B -- "yes, but the same failure twice" --> P["read-only re-plan"] --> W
+    C -- "not met, the same way, right after a re-plan" --> X([stuck, exit 1])
     B -- no --> S([stop, with a named reason])
 ```
 
@@ -108,10 +109,12 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   that plan (`NN/plan.md` in the records, next to `NN/plan-prompt.md`). A step right after the pre-check never
   counts as a repeat, there is no re-plan after the last step or past a limit, a re-plan that uses up the tokens or
   the time ends the run before the next step, and a failed re-plan call keeps the last plan. `--no-plan` turns it
-  off. The run stays at most `--max-iterations` worker calls (default 4), so at most `--max-iterations` − 2
-  re-plans (2 by default); the report counts them. Any number with a time unit counts as a timing, and any clock
+  off. If the step that got the new plan fails the same way again, the plan did not help and the run ends as
+  `stuck` (exit 1) instead of spending the rest of the budget; a failed re-plan call made no new plan, so it
+  does not count. A second re-plan needs the failure to change first, so with the default 4 worker calls there
+  is at most one; the report counts them. Any number with a time unit counts as a timing, and any clock
   time or date is taken out, so two failures that differ only in one (`took 350ms`, then `took 300ms`) count as
-  the same: the price is one re-plan that was not needed. When a run ends with the check failing the way it did
+  the same: the price is a re-plan, or a `stuck` stop, that was not needed. When a run ends with the check failing the way it did
   after an earlier step, by the same rule, the report's check line says so: `exit 2, the same failure since the
   pre-check` (or `since step 2`). Since the pre-check, it means no step changed what the check tests: the check
   or the environment is the problem, not the goal (a test file that cannot even be collected, say), and
@@ -244,6 +247,7 @@ Every run ends with exactly one named stop reason and an exit code:
 | `out_of_iterations` | All N worker calls were made (default 4). | 1 |
 | `out_of_time` | The wall-clock limit was reached (default 30 minutes). | 1 |
 | `out_of_tokens` | The `--max-tokens` limit was reached. | 1 |
+| `stuck` | The step that got a re-plan failed the check the same way again: the new plan did not help, so more steps from the same notes would not either. | 1 |
 | `provider_failed` | The agent tool was missing, failed, or returned unreadable output. | 3 |
 | `protected_file_changed` | The worker changed a `--protect` path (nothing is checked), or a command the judge ran did (its verdict does not count), or a command the re-planner ran did (seen right after it). | 3 |
 | `interrupted` | You pressed Ctrl+C. | 130 |

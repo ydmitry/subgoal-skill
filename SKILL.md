@@ -39,7 +39,7 @@ You are told when the background command exits. Read its report, then act on its
 | Exit | Stop reason | Next |
 |---|---|---|
 | 0 | goal_met, unchecked | Show the diff and the worker's `notes.md` (what it guessed, chose or could not run; an unchecked run writes none: read `01/reply.md`). A check proves what it tests; a judge's "met" is an opinion; unchecked means nothing verified it, so run the tests yourself. |
-| 1 | out_of_iterations, out_of_time, out_of_tokens | Read `notes.md`, the last `check.txt` or `judge.md`, and any `NN/plan.md`. If the check line says the same failure since the pre-check, no step changed what the check tests: fix the check or the environment, not the goal (`notes.md` says what the worker verified instead). Otherwise refine the goal or a limit. Ask before another run. |
+| 1 | out_of_iterations, out_of_time, out_of_tokens, stuck | Read `notes.md`, the last `check.txt` or `judge.md`, and any `NN/plan.md` (`stuck`: the step after a re-plan failed the same way). If the check line says the same failure since the pre-check, no step changed what the check tests: fix the check or the environment, not the goal (`notes.md` says what the worker verified instead). Otherwise refine the goal or a limit. Ask before another run. |
 | 2 | bad arguments, check_already_passes | Fix the command. A check that passes before any step cannot tell done from not done: make it fail first. |
 | 3 | provider_failed, protected_file_changed | Quote the error. For a protected change, show the diff. |
 | 130 | interrupted | Stop. |

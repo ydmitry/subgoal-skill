@@ -93,6 +93,7 @@ class StopReason(str, Enum):
     INTERRUPTED = "interrupted"
     UNCHECKED = "unchecked"
     CHECK_ALREADY_PASSES = "check_already_passes"   # before any step: it cannot tell done from not done
+    STUCK = "stuck"                                 # the step after a re-plan failed the same way: the plan did not help
 
     @property
     def exit_code(self):
@@ -147,14 +148,12 @@ class Run:
 def run_check(check, workdir, timeout_s, step=0):
     start = time.monotonic()
     code, out, err, timed_out = run_process(check, workdir, timeout_s, shell=True)
-    seconds = round(time.monotonic() - start, 2)
-    return CheckResult(None if timed_out else code, (out + err)[-TAIL_CAP:], seconds, step)
+    return CheckResult(None if timed_out else code, (out + err)[-TAIL_CAP:], round(time.monotonic() - start, 2), step)
 
 
 def build_prompt(goal, check, protect, notes_path, notes, last, skills=(), plan="", judged=True):
     """The same template every step, built from files, never from chat. `last` is the last CheckResult or Verdict."""
-    if len(notes) > NOTES_CAP:
-        notes = notes[:NOTES_CAP] + f"\n[... notes cut at {NOTES_CAP:,} characters]"
+    notes = notes[:NOTES_CAP] + f"\n[... notes cut at {NOTES_CAP:,} characters]" if len(notes) > NOTES_CAP else notes
     plan = f"{plan}\n\n" if plan else ""                         # a plan comes with its PLAN (made ...) line
     if check is None and not judged:      # the one step has no loop to explain, no notes or review to pass on
         keep = f"\nDo not edit these paths (the run stops if they change): {', '.join(protect)}\n" if protect else ""
@@ -212,8 +211,7 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
     time_left()
     run.status = "ended"
     save(run)
-    text = report(run)
-    (folder / "report.md").write_text(text + "\n")
+    (folder / "report.md").write_text((text := report(run)) + "\n")
     print(text)
     return run
 
@@ -223,7 +221,7 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
         run.last_check = _check(run, 0)
         if run.last_check.exit_code == 0:
             return StopReason.CHECK_ALREADY_PASSES                  # no step could show in it
-    traces = {}                                                     # step: its trace.md, as the loop wrote it
+    traces, planned = {}, 0                 # step: its trace.md, as the loop wrote it; the step a re-plan was made for
     plan = _plan(run, planner, time_left, run.folder, FIRST_PLAN) if planner and run.check is None else ""  # a check: re-plans only
     for i in range(1, run.limits.max_iterations + 1):
         if stop := _budget(run, time_left):                         # a: no step past a limit, a plan's tokens too
@@ -279,12 +277,14 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
         save(run)
         if met:                                                     # g
             return StopReason.GOAL_MET
+        if stuck and planned == i:                                  # its new plan did not help: neither would more steps
+            return StopReason.STUCK
         if stop := _budget(run, time_left):                         # h
             return stop
         if stuck and planner and i < run.limits.max_iterations:     # i: the same failure twice: re-plan
             before = fingerprint(run.dir, run.protect)              # what the check left there is not the planner's
             if new := _replan(run, planner, time_left, step, plan, i):      # a failed call keeps the last plan
-                plan, run.replans = new, run.replans + 1
+                plan, run.replans, planned = new, run.replans + 1, i + 1
             if _moved(run, before, "planner"):                      # a command it ran moved the finish line
                 return StopReason.PROTECTED_FILE_CHANGED
     return StopReason.OUT_OF_ITERATIONS

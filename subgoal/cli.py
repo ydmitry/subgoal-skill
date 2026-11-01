@@ -10,7 +10,7 @@ from .opencode2 import OpenCode2
 
 PROVIDERS = {"claude-code": ClaudeCode, "opencode": OpenCode, "opencode2": OpenCode2}   # one entry each
 
-EPILOG = """exit codes: 0 goal_met, unchecked | 1 out_of_iterations, out_of_time, out_of_tokens
+EPILOG = """exit codes: 0 goal_met, unchecked | 1 out_of_iterations, out_of_time, out_of_tokens, stuck
             2 bad arguments, check_already_passes | 3 provider_failed, protected_file_changed | 130 interrupted
 records:    DIR/.subgoal/<run-id>/
 safety:     the worker edits DIR and runs commands there as you, unsandboxed; the planner and the judge have no

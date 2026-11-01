@@ -5,7 +5,8 @@ Every stop reason has at least one test:
     stop reason              exit  tests
     goal_met                 0     L2, L13
     check_already_passes     2     L1 (at the pre-check: no step runs)
-    out_of_iterations        1     L3, L4, L8, L12, L16-L19 (the re-plan)
+    out_of_iterations        1     L3, L4, L8, L12, L18, L19 (a failed re-plan), L24 (no planner)
+    stuck                    1     L16, L17b, L19, L24 (the step after a re-plan failed the same way)
     out_of_time              1     L6, L6b (the provider ran out of time)
     out_of_tokens            1     L7, L20 (no re-plan past a limit), L20b (no step after one that crossed it)
     provider_failed          3     L9
@@ -181,7 +182,7 @@ class LoopTest(unittest.TestCase):
 
     def test_L16_the_same_failure_twice_brings_a_re_plan(self):
         run = self.replan([say()] * 3, [say("TRY app.py line 1", tokens=50)], limits=Limits(max_iterations=3))
-        self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=3)
+        self.ended(run, R.STUCK, 1, calls=3)                            # step 3, with the plan, failed the same way
         self.assertEqual(len(self.planner.prompts), 1)    # after step 2: not after step 1 (vs the pre-check), nor after the last
         asked = self.planner.prompts[0]
         for said in ("The workers are stuck", "change no file", "GOAL\nmake app.py say done", CHECK, "app.py says todo",
@@ -232,8 +233,8 @@ class LoopTest(unittest.TestCase):
                            "n = int(p.read_text()) + 1 if p.exists() else 0\np.write_text(str(n))\n"
                            "print('E   assert 1 == 2\\n' * 300, end='')\nprint(f'FAIL test_app ({10 ** n} ms)')\nexit(1)\n")
         run = self.replan([say()] * 4, [say("P1"), say("P2")], check=long, limits=Limits(max_iterations=4))
-        self.assertEqual(len(self.planner.prompts), 2)                   # the 4,000-character tail starts 1 later each run
-        self.assertEqual(run.replans, 2)
+        self.ended(run, R.STUCK, 1, calls=3)                            # the 4,000-character tail starts 1 later each run:
+        self.assertEqual(run.replans, 1)                                # the same after step 2 (re-plan) and 3 (stuck)
 
     def test_L18_a_new_failure_each_step_brings_no_re_plan(self):
         run = self.replan([edit("app.py", f"try {n}\n") for n in (1, 2, 3)], [], limits=Limits(max_iterations=3))
@@ -242,17 +243,33 @@ class LoopTest(unittest.TestCase):
         self.assertNotIn("re-plans", self.printed)
 
     def test_L19_a_second_repeat_re_plans_from_the_last_plan_and_a_failed_one_keeps_it(self):
-        run = self.replan([say()] * 4, [say("PLAN ONE"), say("PLAN TWO")], limits=Limits(max_iterations=4))
-        self.assertEqual(len(self.planner.prompts), 2)                  # after steps 2 and 3
+        moves = [say(), say(), edit("app.py", "try 1\n"), say(), say()]  # the plan moved it, then it stuck again
+        run = self.replan(moves, [say("PLAN ONE"), say("PLAN TWO")], limits=Limits(max_iterations=5))
+        self.ended(run, R.STUCK, 1, calls=5)
+        self.assertEqual(len(self.planner.prompts), 2)                  # after steps 2 and 4
         self.assertIn("PLAN ONE", self.planner.prompts[1])               # it is told what did not get them past it
-        self.assertIn("PLAN TWO", self.fake.prompts[3])
-        self.assertNotIn("PLAN ONE", self.fake.prompts[3])
+        self.assertIn("PLAN TWO", self.fake.prompts[4])
+        self.assertNotIn("PLAN ONE", self.fake.prompts[4])
         self.assertEqual(run.replans, 2)
-        run = self.replan([say()] * 4, [say("PLAN ONE"), fail(ProviderError("no answer"))], limits=Limits(max_iterations=4))
-        self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=4)
-        self.assertIn("PLAN ONE", self.fake.prompts[3])                  # a failed re-plan keeps the last plan
-        self.assertFalse((run.folder / "03" / "plan.md").exists())
+        (self.dir / "app.py").write_text("todo\n")
+        run = self.replan(moves, [say("PLAN ONE"), fail(ProviderError("no answer"))], limits=Limits(max_iterations=5))
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=5)                # no new plan reached step 5, so no stuck stop
+        self.assertIn("PLAN ONE", self.fake.prompts[4])                  # a failed re-plan keeps the last plan
+        self.assertFalse((run.folder / "04" / "plan.md").exists())
         self.assertEqual(run.replans, 1)
+
+    def test_L24_the_step_after_a_re_plan_failing_the_same_way_ends_the_run_as_stuck(self):
+        run = self.replan([say()] * 4, [say("P1"), say("P2")], limits=Limits(max_iterations=4))
+        self.ended(run, R.STUCK, 1, calls=3)                            # not step 4 and a second plan
+        self.assertEqual((len(self.planner.prompts), run.replans), (1, 1))
+        self.assertIn("subgoal: GOAL NOT MET (stuck)", self.printed)
+        self.assertIn("exit 1, the same failure since the pre-check", self.printed)
+        run = self.replan([say(), say(), edit("app.py", "try 1\n"), edit("app.py", "done\n")], [say("P")],
+                          limits=Limits(max_iterations=4))
+        self.ended(run, R.GOAL_MET, 0, calls=4)                         # the plan moved the failure: no stop
+        (self.dir / "app.py").write_text("todo\n")
+        run = self.go([say()] * 4, limits=Limits(max_iterations=4))       # no planner, no re-plan, no stuck stop
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=4)
 
     def test_L20_no_re_plan_past_a_limit(self):
         run = self.replan([say(tokens=600)] * 3, [say("P")], limits=Limits(max_iterations=3, max_tokens=1000))

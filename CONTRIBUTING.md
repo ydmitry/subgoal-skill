@@ -80,10 +80,12 @@ Record one real output once and keep it in `tests/fixtures`.
 
 ## An exercise
 
-When the check fails the same way twice in a row, the loop already re-plans (`_replan()` in
-`loop.py`). Stop when the re-plan did not help: if the step after a re-plan fails the same way
-again, end the run with its own stop reason (`stuck`) instead of re-planning and spending the
-rest of the budget.
+The loop re-plans when the check fails the same way after two worker steps in a row, and ends as
+`stuck` when the step after a re-plan fails that way again (`_steps()` in `loop.py`). A step 1
+that leaves the check exactly as the pre-check found it is not counted yet: the rule waits for
+step 2 (`prev.step > 0`). Count it, so a check that no step can move re-plans after step 1 and
+stops after step 2, and find the test that tells you what this costs a run whose step 1 only
+read the code.
 
 ## Proposing a change
 
