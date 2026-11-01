@@ -321,8 +321,10 @@ class JudgeLoopTest(unittest.TestCase):
 
     def test_J19_a_document_review_lists_each_fact_it_checked(self):
         asked = " ".join(judge_prompt("Explain it on a page", "/d", "done", "/d/.subgoal/r/").split())
-        self.assertIn("For a document that states facts, first list each fact you checked, one per line, as true, false or "
-                      "unsupported with the file:line or command that shows it.", asked)
+        self.assertIn("For a document that states facts, first list each fact you checked, one per line: true, false or "
+                      "unsupported, with the file:line or command.", asked)
+        self.assertIn("Include the general rules its prose states (never, always, only, every, cannot, because), testing each "
+                      "against the code or data: one counterexample makes a rule false.", asked)
         self.assertLess(asked.index("first list each fact you checked"), asked.index("Your last line must be"))
 
 
