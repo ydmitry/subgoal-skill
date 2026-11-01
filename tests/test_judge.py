@@ -325,6 +325,8 @@ class JudgeLoopTest(unittest.TestCase):
                       "unsupported, with the file:line or command.", asked)
         self.assertIn("Include the general rules its prose states (never, always, only, every, cannot, because), testing each "
                       "against the code or data: one counterexample makes a rule false.", asked)
+        self.assertIn("End with each failing part on one line, right before the verdict line.", asked)   # the worker sees the end
+        self.assertIn("material in the folder (a page, a report), each fact is part of the goal", asked)
         self.assertLess(asked.index("first list each fact you checked"), asked.index("Your last line must be"))
 
 

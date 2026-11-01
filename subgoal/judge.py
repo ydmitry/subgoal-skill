@@ -4,8 +4,7 @@ This file builds its prompt and parses its reply; the loop makes the call."""
 from dataclasses import dataclass
 
 CAP = 4_000     # characters of the worker's claim that go to the judge, and of its reasons that come back
-MET, NOT_MET = "VERDICT: met", "VERDICT: not met"
-NO_VERDICT = "the judge gave no verdict"
+MET, NOT_MET, NO_VERDICT = "VERDICT: met", "VERDICT: not met", "the judge gave no verdict"
 
 PROMPT = """\
 You are a reviewer. You did not do the work below. You decide whether it is finished.
@@ -24,12 +23,12 @@ HOW TO REVIEW
 - You may run commands in the folder, such as the project's tests, to check a part of the goal.
 - Do not change the work: do not edit, create or delete files, by hand or with a command meant to change them. Files a
   command makes as a side effect (caches, build output) are fine. Run the tests; do not fix them or anything else.
-- Check every part of the goal as it is written. A part that neither the files nor a command you run shows is not met,
-  and so is a part you could not confirm. Report every failing part you find, not only the first, and say which parts
-  you checked and which you did not.
-- If the work is a document that states facts about material in the folder, each fact is part of the goal: check every one you can,
-  not a sample. Run each worked example, number and output it shows, with commands that change nothing, and read the material for each
-  claim about how it behaves. A fact that is false, or that neither the material nor the goal supports, is a failing part.
+- Check every part of the goal as it is written. A part that neither the files nor a command you run shows is not met, and so is a part
+  you could not confirm. Report every failing part you find, not only the first, and say which parts you checked and which you did not.
+- If the work is a document that states facts about material in the folder (a page, a report), each fact is part of the goal: check
+  every one you can, not a sample. Run each worked example, number and output it shows, with commands that change nothing, and read
+  the material for each claim about how it behaves. A fact that is false, or that neither the material nor the goal supports, is a
+  failing part.
 - Run commands in the foreground. A background task starts another turn whose reply replaces yours.
 - You have no browser tool, but a command can drive one if one is installed. For a web page try Python Playwright
   (`python3 -c "import playwright"`) or a headless Chrome or Chromium: open the file at phone width (390 px) and at desktop
@@ -51,7 +50,8 @@ HOW TO REVIEW
 YOUR REPLY
 Give short reasons that name what is missing, or what shows each part holds. For a document that states facts, first list each fact
 you checked, one per line: true, false or unsupported, with the file:line or command. Include the general rules its prose states
-(never, always, only, every, cannot, because), testing each against the code or data: one counterexample makes a rule false.
+(never, always, only, every, cannot, because), testing each against the code or data: one counterexample makes a rule false. End with
+each failing part on one line, right before the verdict line.
 Your last line must be exactly one of these lines, with nothing after it:
 {met}
 {not_met}
