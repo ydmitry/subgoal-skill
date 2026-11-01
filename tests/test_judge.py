@@ -310,6 +310,15 @@ class JudgeLoopTest(unittest.TestCase):
             run_loop("g", None, self.dir, self.worker, protect=["test_app.py"])
         self.assertIn("Do not edit these paths (the run stops if they change): test_app.py", self.worker.prompts[0])
 
+    def test_J18_the_facts_a_document_states_are_part_of_the_goal(self):
+        asked = " ".join(judge_prompt("Explain it on a page", "/d", "done", "/d/.subgoal/r/").split())
+        for said in ("If the work is a document that states facts about material in the folder", "each fact is part of "
+                     "the goal: check every one you can, not a sample.",
+                     "Run each worked example, number and output it shows, with commands that change nothing",
+                     "read the material for each claim about how it behaves.",
+                     "A fact that is false, or that neither the material nor the goal supports, is a failing part."):
+            self.assertIn(said, asked)
+
 
 if __name__ == "__main__":
     unittest.main()

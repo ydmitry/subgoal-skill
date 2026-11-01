@@ -131,9 +131,11 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   `node` or `python`) to check a part, and ends its reply with `VERDICT: met` or
   `VERDICT: not met` (anything else is not met). Its "met" is a model's opinion, and the report
   says so. It has no browser tool, but it tries Playwright or a headless Chrome from the shell for a web page.
+  When the work is a document that states facts about the folder's material (a page, a report), it is told to check
+  every fact it can, not a sample, and to run each worked example and number the document shows.
   In this mode the worker may run any command in the folder too.
   Try it with `--judge` on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
-  It is useful for checking *how* the work was done (below), less for whether the work is correct.
+  It is useful for checking *how* the work was done (below), less for whether code is correct.
 - **The plan.** With no `--check`, a read-only session of the judge model (`--judge-model`, else `--model`) first
   reads the folder and writes
   a plan to `plan.md` in the records: the parts the goal covers, suspected defects with file and line, the
