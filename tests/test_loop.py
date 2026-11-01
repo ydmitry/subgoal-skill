@@ -3,18 +3,20 @@
 Every stop reason has at least one test:
 
     stop reason              exit  tests
-    goal_met                 0     L1 (at the pre-check), L2, L13
-    out_of_iterations        1     L3, L4, L8, L12
+    goal_met                 0     L2, L13
+    check_already_passes     2     L1 (at the pre-check: no step runs)
+    out_of_iterations        1     L3, L4, L8, L12, L16-L19 (the re-plan)
     out_of_time              1     L6, L6b (the provider ran out of time)
-    out_of_tokens            1     L7
+    out_of_tokens            1     L7, L20 (no re-plan past a limit), L20b (no step after one that crossed it)
     provider_failed          3     L9
-    protected_file_changed   3     L11
+    protected_file_changed   3     L11, L21 (a planner's command moved it)
     interrupted              130   L10
 """
 import io
 import json
 import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -50,11 +52,18 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(len(self.fake.prompts), calls)
         self.assertEqual(json.loads((run.folder / "run.json").read_text())["status"], "ended")
 
-    def test_L1_goal_already_holds(self):
+    def replan(self, steps, plans, **kwargs):
+        self.planner = FakeProvider(plans)
+        return self.go(steps, plan=self.planner, **kwargs)
+
+    def test_L1_a_check_that_already_passes_runs_no_step(self):
         (self.dir / "app.py").write_text("done\n")
         run = self.go([])
-        self.ended(run, R.GOAL_MET, 0, calls=0)
+        self.ended(run, R.CHECK_ALREADY_PASSES, 2, calls=0)
         self.assertTrue((run.folder / "00" / "check.txt").exists())
+        self.assertIn("subgoal: CHECK ALREADY PASSES before any step", self.printed)
+        self.assertIn("make it fail first", self.printed)
+        self.assertNotIn("GOAL MET", self.printed)
 
     def test_L2_fixed_on_step_2(self):
         run = self.go([edit("app.py", "halfway\n"), edit("app.py", "done\n")])
@@ -169,6 +178,112 @@ class LoopTest(unittest.TestCase):
         for later in (second, third):                                     # kept from step 1 even when step 2 used none
             self.assertIn("SKILLS EARLIER STEPS USED: other, tiny. Invoke them again", later)
             self.assertIn("do not search the disk", later)
+
+    def test_L16_the_same_failure_twice_brings_a_re_plan(self):
+        run = self.replan([say()] * 3, [say("TRY app.py line 1", tokens=50)], limits=Limits(max_iterations=3))
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=3)
+        self.assertEqual(len(self.planner.prompts), 1)    # after step 2: not after step 1 (vs the pre-check), nor after the last
+        asked = self.planner.prompts[0]
+        for said in ("The workers are stuck", "change no file", "GOAL\nmake app.py say done", CHECK, "app.py says todo",
+                     "or a protected path (none)."):
+            self.assertIn(said, asked)
+        self.assertEqual((run.folder / "02" / "plan.md").read_text(), "TRY app.py line 1\n")
+        self.assertEqual((run.folder / "02" / "plan-prompt.md").read_text(), asked)
+        first, second, third = self.fake.prompts
+        self.assertNotIn("PLAN (made", first + second)                 # no plan before step 1 with a check
+        self.assertIn("PLAN (made by a read-only planner after step 2, when the check failed the same way twice", third)
+        self.assertIn("TRY app.py line 1", third)
+        self.assertLess(third.index("PLAN (made"), third.index("FINISH LINE"))
+        self.assertEqual((run.replans, run.tokens), (1, 50))            # its tokens count against the limit
+        self.assertIn("3 of 3 worker calls (re-plans: 1)", self.printed)
+
+    def test_L23_the_report_says_since_when_the_check_has_failed_the_same_way(self):
+        run = self.replan([say("x" * 400)] * 4, [say("P1"), say("P2")], limits=Limits(max_iterations=4))
+        self.assertEqual(run.same_since, 0)                                # no step changed what the check printed
+        self.assertIn("exit 1, the same failure since the pre-check", self.printed)
+        self.assertIn('"' + "x" * 150 + " [...] " + "x" * 150 + '"', self.printed)   # last words: the start and the end
+        run = self.go([edit("app.py", "try 1\n")] + [say("short")] * 2, limits=Limits(max_iterations=3))
+        self.assertEqual(run.same_since, 1)
+        self.assertIn("exit 1, the same failure since step 1", self.printed)
+        self.assertIn('(unverified): "short"', self.printed)                # a short reply is shown whole
+        run = self.go([edit("app.py", "a\n"), edit("app.py", "b\n")], limits=Limits(max_iterations=2))
+        self.assertEqual(run.same_since, 2)                                # the last step changed the failure
+        self.assertNotIn("the same failure", self.printed)
+        self.go([edit("app.py", "done\n")])
+        self.assertNotIn("the same failure", self.printed)
+
+    def script(self, name, body):
+        (self.dir / name).write_text(body)
+        return f"{PY} {name}"
+
+    def test_L17_timings_clocks_dates_and_addresses_do_not_make_a_failure_new(self):
+        timed = self.script("timed.py", "import time\nn = time.time_ns()\n"
+                            "print(f'Start at {n % 24:02d}:{n % 60:02d}:{n % 59:02d}.{n % 997}')\n"
+                            "print(f'stamp {2000 + n % 30}-0{1 + n % 9}-1{n % 10}T00:00:00Z')\n"
+                            "print(f'{n % 24:02d}:{n % 60:02d}:{n % 59:02d},{n % 997} ERROR test_app failed')\n"
+                            "print(f'  duration_ms: {n % 1000 / 7:.6f}')\nprint(f'Total time: {n % 97 / 7:.4f} Seconds')\n"
+                            "print(f'FAILED in {n % 1000 / 1000:.6f}s at {hex(n)}')\nexit(1)\n")
+        self.replan([say()] * 3, [say("P")], check=timed, limits=Limits(max_iterations=3))
+        self.assertEqual(len(self.planner.prompts), 1)
+        self.assertIn("The workers are stuck", self.planner.prompts[0])
+
+    def test_L17b_a_long_output_repeats_even_when_a_timing_changes_width(self):
+        long = self.script("long.py", "from pathlib import Path\np = Path('runs.txt')\n"
+                           "n = int(p.read_text()) + 1 if p.exists() else 0\np.write_text(str(n))\n"
+                           "print('E   assert 1 == 2\\n' * 300, end='')\nprint(f'FAIL test_app ({10 ** n} ms)')\nexit(1)\n")
+        run = self.replan([say()] * 4, [say("P1"), say("P2")], check=long, limits=Limits(max_iterations=4))
+        self.assertEqual(len(self.planner.prompts), 2)                   # the 4,000-character tail starts 1 later each run
+        self.assertEqual(run.replans, 2)
+
+    def test_L18_a_new_failure_each_step_brings_no_re_plan(self):
+        run = self.replan([edit("app.py", f"try {n}\n") for n in (1, 2, 3)], [], limits=Limits(max_iterations=3))
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=3)
+        self.assertEqual(self.planner.prompts, [])
+        self.assertNotIn("re-plans", self.printed)
+
+    def test_L19_a_second_repeat_re_plans_from_the_last_plan_and_a_failed_one_keeps_it(self):
+        run = self.replan([say()] * 4, [say("PLAN ONE"), say("PLAN TWO")], limits=Limits(max_iterations=4))
+        self.assertEqual(len(self.planner.prompts), 2)                  # after steps 2 and 3
+        self.assertIn("PLAN ONE", self.planner.prompts[1])               # it is told what did not get them past it
+        self.assertIn("PLAN TWO", self.fake.prompts[3])
+        self.assertNotIn("PLAN ONE", self.fake.prompts[3])
+        self.assertEqual(run.replans, 2)
+        run = self.replan([say()] * 4, [say("PLAN ONE"), fail(ProviderError("no answer"))], limits=Limits(max_iterations=4))
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, calls=4)
+        self.assertIn("PLAN ONE", self.fake.prompts[3])                  # a failed re-plan keeps the last plan
+        self.assertFalse((run.folder / "03" / "plan.md").exists())
+        self.assertEqual(run.replans, 1)
+
+    def test_L20_no_re_plan_past_a_limit(self):
+        run = self.replan([say(tokens=600)] * 3, [say("P")], limits=Limits(max_iterations=3, max_tokens=1000))
+        self.ended(run, R.OUT_OF_TOKENS, 1, calls=2)
+        self.assertEqual(self.planner.prompts, [])
+
+    def test_L20b_no_step_after_a_re_plan_that_crossed_the_token_limit(self):
+        run = self.replan([say(tokens=100)] * 4, [say("P", tokens=10_000)], limits=Limits(max_iterations=4, max_tokens=5000))
+        self.ended(run, R.OUT_OF_TOKENS, 1, calls=2)                    # not a third worker call at 10,200 tokens
+        self.assertEqual((len(self.planner.prompts), run.tokens), (1, 10_200))
+
+    def test_L21_a_protected_path_the_planner_moved_stops_the_run_before_the_next_step(self):
+        (self.dir / "test_app.py").write_text("the finish line\n")
+        run = self.replan([say()] * 4, [edit("test_app.py", "moved\n", text="P")], protect=["test_app.py"],
+                          limits=Limits(max_iterations=4))
+        self.ended(run, R.PROTECTED_FILE_CHANGED, 3, calls=2)            # caught before step 3, not blamed on its worker
+        self.assertIn("error     the planner changed protected paths: test_app.py", self.printed)
+
+    def test_L22_a_file_a_failing_check_leaves_in_a_protected_folder_is_not_the_planners(self):
+        (self.dir / "tests").mkdir()
+        (self.dir / "tests" / "test_app.txt").write_text("the finish line\n")
+        leaves = self.script("leaves.py", "from pathlib import Path\nout = Path('tests/app.received.txt')\n"
+                             "ok = 'done' in Path('app.py').read_text()\nout.unlink(missing_ok=True) if ok else out.write_text('todo')\n"
+                             "exit(0 if ok else 1)\n")                    # like ApprovalTests: a file only while it fails
+
+        def fixes_and_runs_the_check(workdir):                          # as FINISH_CHECK invites it to
+            (workdir / "app.py").write_text("done\n")
+            subprocess.run([sys.executable, "leaves.py"], cwd=workdir, check=False)
+            return Reply("fixed")
+        run = self.replan([fixes_and_runs_the_check], [], check=leaves, protect=["tests"])
+        self.ended(run, R.GOAL_MET, 0, calls=1)                         # the pre-check's file stops nothing
 
 
 if __name__ == "__main__":

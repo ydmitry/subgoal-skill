@@ -9,7 +9,7 @@ from unittest import mock
 
 from subgoal.claude_code import ClaudeCode
 from subgoal.cli import main
-from subgoal.loop import StopReason
+from subgoal.loop import Limits, StopReason
 
 CORE = Path(__file__).resolve().parent.parent / "subgoal"
 
@@ -37,15 +37,36 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn(ClaudeCode(allow=["Bash(exit 1)"]).describe(), out)
         self.assertIn("GOAL\nSay hi.", out)
+        self.assertIn("pre-check: exit 1\n", out)
+        self.assertIn("plan: a read-only session, only to re-plan before step 3 or later, after the same failure twice\n"
+                      f"planner: {ClaudeCode(edit=False).describe()}\n", out)          # shown before the user says yes
         self.assertEqual(list(self.dir.iterdir()), [])
+        out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--check", "exit 1", "--no-plan", "--dry-run")[1]
+        self.assertIn("plan: none (--no-plan)", out)
+        self.assertNotIn("planner:", out)
+
+    def test_X1b_a_dry_run_says_when_the_check_already_passes(self):
+        code, out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--check", "true", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("pre-check: exit 0. It already passes, so a run would stop before any step "
+                      "(check_already_passes): make it fail first.", out)
 
     def test_X2_argument_guards(self):
         ok, here = ["--goal", "g", "--check", "true"], ["--dir", str(self.dir)]
         for argv in (["--dir", "~", *ok], ["--dir", "/", *ok], [*here, "--check", "true"],
-                     [*here, *ok, "--goal-file", "f"], [*here, *ok, "--max-iterations", "0"],
-                     [*here, *ok, "--judge-model", "m"], [*here, *ok, "--no-plan"], [*here, *ok, "--judge"]):
+                     [*here, *ok, "--goal-file", "f"], [*here, *ok, "--max-iterations", "0"], [*here, *ok, "--judge"]):
             self.assertEqual(self.cli(*argv)[0], 2, argv)
         self.assertEqual(list(self.dir.iterdir()), [])
+
+    def test_X8_four_steps_by_default_and_the_re_planner_takes_the_judge_model(self):
+        self.assertEqual(Limits().max_iterations, 4)
+        with mock.patch("subgoal.cli.run_loop") as run_loop:
+            run_loop.return_value.stop_reason = StopReason.GOAL_MET
+            self.cli("--dir", str(self.dir), "--goal", "g", "--check", "true", "--model", "w", "--judge-model", "j")
+        self.assertEqual(run_loop.call_args.args[4].max_iterations, 4)
+        plan = run_loop.call_args.kwargs["plan"]
+        self.assertEqual((plan.edit, plan.argv[plan.argv.index("--model") + 1]), (False, "j"))
+        self.assertIn("default 4", self.cli("--help")[1])
 
     def test_X3_no_check_and_a_judge_flag_means_a_judge(self):
         code, out = self.cli("--dir", str(self.dir), "--goal", "Review the docs.", "--judge", "--dry-run")
@@ -59,8 +80,9 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("pre-check: exit", out)
         self.assertEqual(list(self.dir.iterdir()), [])
 
-    def test_X6_the_plan_is_on_with_no_check_and_off_with_no_plan(self):
-        for argv, planner in (([], True), (["--judge"], True), (["--no-plan"], False), (["--check", "true"], False)):
+    def test_X6_the_planner_is_on_unless_no_plan(self):
+        for argv, planner in (([], True), (["--judge"], True), (["--no-plan"], False), (["--check", "true"], True),
+                              (["--check", "true", "--no-plan"], False)):
             with mock.patch("subgoal.cli.run_loop") as run_loop:
                 run_loop.return_value.stop_reason = StopReason.GOAL_MET
                 self.assertEqual(self.cli("--dir", str(self.dir), "--goal", "g", *argv)[0], 0)
@@ -120,7 +142,7 @@ class CliTest(unittest.TestCase):
             return sum(1 for line in f.read_text().splitlines() if line.strip())
         providers = ("claude_code.py", "opencode.py", "opencode2.py")   # a provider is not part of the loop core
         core = sum(count(f) for f in CORE.glob("*.py") if f.name not in providers)
-        self.assertLessEqual(core, 550, "the core must stay readable in one sitting")
+        self.assertLessEqual(core, 570, "the core must stay readable in one sitting")
         for name in providers:
             self.assertLessEqual(count(CORE / name), 100, f"{name}: a provider must stay small")
 

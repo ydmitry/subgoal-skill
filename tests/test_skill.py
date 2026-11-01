@@ -32,6 +32,20 @@ class SkillTest(unittest.TestCase):
         for flag in flags:
             self.assertIn(flag, HELP, f"SKILL.md mentions {flag}, which --help does not list")
 
+    def test_a_finished_run_points_at_the_workers_notes(self):
+        """The report cuts the worker's last words at 300 characters; what it says it guessed or could not run is in notes.md."""
+        row = re.search(r"^\| 0 \|.*$", SKILL, re.M).group()
+        self.assertIn("notes.md", row)
+        self.assertIn("reply.md", row)                  # an unchecked run's one step writes no notes: its reply has them
+
+    def test_a_check_no_step_moved_is_not_a_goal_to_refine(self):
+        """When no step changed what the check prints, the check or the environment is wrong, not the goal."""
+        row = re.search(r"^\| 1 \|.*$", SKILL, re.M).group()
+        said = re.search(r"the same failure since the pre-check", row)
+        self.assertTrue(said, "the exit-1 row must name the report's phrase")
+        self.assertIn("the same failure since", (ROOT / "subgoal" / "loop.py").read_text())   # and the report prints it
+        self.assertIn("environment", row[said.end():])
+
     def test_every_exit_code_is_true(self):
         readme, codes = (ROOT / "README.md").read_text(), {r.value: r.exit_code for r in StopReason}
         rows = re.findall(r"^\| (\d+) \| ([a-z_, ]+) \|", SKILL, re.M)

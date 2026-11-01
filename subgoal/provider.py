@@ -10,7 +10,7 @@ class Reply:
     tokens: int | None = None      # tokens the call used, if the tool reports them
     cost_usd: float | None = None  # the tool's own estimate, if it gives one
     session: str | None = None     # an id to look the call up later, if any
-    trace: str | None = None       # the tool calls the agent made, one short line each, in order
+    trace: str | None = None       # one short line per tool call, in order: tool and key argument, never the result
 
 
 class ProviderError(Exception):
@@ -19,8 +19,7 @@ class ProviderError(Exception):
 
 class Provider(Protocol):
     """The constructor also takes `edit=True`. With False, no session has a tool that edits files, though it
-    may run shell commands, and describe() says so (the judge and the planner). Reply.trace may be None;
-    its lines name one call and its key argument, never what the call returned."""
+    may run shell commands, and describe() says so (the judge and the planner). Reply.trace may be None."""
 
     def describe(self) -> str:
         """One line: which tool, model and permissions every call uses (run.json and the report)."""

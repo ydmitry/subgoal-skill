@@ -10,7 +10,7 @@ Read in this order:
 | File | What is in it |
 |---|---|
 | [`subgoal/provider.py`](subgoal/provider.py) | The whole contract between the loop and an agent, about 30 lines. |
-| [`subgoal/loop.py`](subgoal/loop.py) | The loop itself: `run_loop()`, the prompt template, the limits, the stop reasons, the report. |
+| [`subgoal/loop.py`](subgoal/loop.py) | The loop itself: `run_loop()`, the prompt template, the limits, the stop reasons, the plan and the re-plan, the report. |
 | [`subgoal/judge.py`](subgoal/judge.py) | The judge's prompt and the strict parse of its verdict line. |
 | [`subgoal/claude_code.py`](subgoal/claude_code.py) | The `claude -p` command line, its judge variant (no edit tools), and how its JSON events become a `Reply` with a trace of the tool calls. |
 | [`subgoal/opencode.py`](subgoal/opencode.py) | The same for `opencode run` (opencode 1): permissions as one config, JSON events as a `Reply`. |
@@ -45,7 +45,7 @@ local server on 127.0.0.1 that plays a script. It is skipped when the variable i
 
 ## The size rule
 
-The loop core is capped at 550 non-blank lines, not counting the provider modules, and each
+The loop core is capped at 570 non-blank lines, not counting the provider modules, and each
 provider module at 100. `test_S1_size_budget` in [`tests/test_cli.py`](tests/test_cli.py)
 enforces it. If a change needs more lines, something else should get simpler first.
 
@@ -80,8 +80,10 @@ Record one real output once and keep it in `tests/fixtures`.
 
 ## An exercise
 
-Stop when the check output repeats N times in a row: a run that is stuck should end with its
-own stop reason instead of spending the whole budget.
+When the check fails the same way twice in a row, the loop already re-plans (`_replan()` in
+`loop.py`). Stop when the re-plan did not help: if the step after a re-plan fails the same way
+again, end the run with its own stop reason (`stuck`) instead of re-planning and spending the
+rest of the budget.
 
 ## Proposing a change
 

@@ -136,7 +136,7 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertEqual(saved["last_verdict"], {"met": True, "reasons": "fine", "step": 1})
         self.assertEqual((run.folder / "report.md").read_text(), self.printed)
         for said in ("GOAL MET after step 1: a judge said met", "a model's opinion", "Read the diff",
-                     "1 of 5 worker calls (judge calls: 1)", "judge via", "last lines", "fine"):
+                     "1 of 4 worker calls (judge calls: 1)", "judge via", "last lines", "fine"):
             self.assertIn(said, self.printed)
         for claim in ("check exited 0", "exit 0", "proves what the check tests"):
             self.assertNotIn(claim, self.printed)
@@ -152,6 +152,9 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertEqual(run.tokens, 1200)
         run = self.go([say(tokens=1200)] * 3, [judges(True)] * 3, limits=Limits(max_tokens=1000))
         self.ended(run, R.OUT_OF_TOKENS, 1, worker=1, judge=0)         # no call is started past a limit
+        run = self.go([say()], [say("PARTS: app.py", tokens=1500)], limits=Limits(max_tokens=1000), plan=True)
+        self.ended(run, R.OUT_OF_TOKENS, 1, worker=0, judge=1)         # nor a step after a plan that crossed it
+        self.assertIn("tokens    1,500 (limit 1,000", self.printed)    # the plan's tokens, not "no worker calls"
         now = [0.0]
 
         def slow(workdir):
@@ -257,6 +260,22 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertFalse((run.folder / "plan.md").exists())
         self.assertNotIn("PLAN (made", self.worker.prompts[0])
 
+    def test_J7b_a_plan_that_used_up_the_time_still_shows_its_cost(self):
+        now = [0.0]
+
+        def slow_plan(workdir):
+            now[0] += 2000
+            return Reply("PARTS: app.py", cost_usd=0.30)                # a cost, but no token count
+        run = self.go([say()], [slow_plan], limits=Limits(max_seconds=1000), clock=lambda: now[0], plan=True)
+        self.ended(run, R.OUT_OF_TIME, 1, worker=0, judge=1)
+        self.assertIn("cost      $0.30", self.printed)
+
+    def test_J16b_a_judge_loop_never_re_plans(self):
+        run = self.go([say()] * 3, [say("PARTS: app.py"), *[judges(False, "app.py never says done")] * 3],
+                      limits=Limits(max_iterations=3), plan=True)
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=3, judge=4)       # one plan before step 1, then a verdict per step
+        self.assertEqual(run.replans, 0)
+
     def test_J17_no_check_and_no_judge_is_one_unchecked_step(self):
         self.worker, self.planner = FakeProvider([edit("app.py", "done\n", tokens=100)]), FakeProvider([say("PARTS: app.py", tokens=70)])
         printed = io.StringIO()
@@ -273,9 +292,11 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertEqual(run.tokens, 170)
         self.assertIsNone(run.last_check or run.last_verdict)
         self.assertFalse((run.folder / "01" / "check.txt").exists())
-        for said in ("DONE, NOT CHECKED", "nothing verified it", "check     none, and no judge", "1 of 1 worker calls"):
+        for said in ("DONE, NOT CHECKED", "nothing verified it", "check     none, and no judge", "1 of 1 worker calls",
+                     "(all calls included)"):
             self.assertIn(said, printed.getvalue())
         self.assertNotIn("GOAL MET", printed.getvalue())
+        self.assertNotIn("checks included", printed.getvalue())       # no check ran
         self.assertEqual(json.loads((run.folder / "run.json").read_text())["status"], "ended")
 
     def test_J17b_an_unchecked_run_still_stops_on_a_protected_change_and_a_failed_call(self):

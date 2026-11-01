@@ -33,6 +33,7 @@ flowchart LR
     C -- met --> M([goal met, exit 0])
     C -- not met --> B{budget left?}
     B -- yes --> W
+    B -- "yes, but the same failure twice" --> P["read-only re-plan"] --> W
     B -- no --> S([stop, with a named reason])
 ```
 
@@ -64,7 +65,7 @@ subgoal: GOAL MET after step 1: the check exited 0
   This proves what the check tests and nothing more. Read the diff.
   goal      Make the tests in test_fizzbuzz.py pass without editing that file.
   check     python3 -m unittest -q test_fizzbuzz      last run after step 1: exit 0
-  steps     1 of 5 worker calls
+  steps     1 of 4 worker calls
   time      0m 18s of 30m 00s (checks included)
   tokens    174,667 (no limit set; as reported by the provider)
   cost      $0.01 (the provider's own estimate; a subscription is not billed per call)
@@ -85,7 +86,8 @@ it was always one step. A second step happens when a step ends with the check st
 the next fresh session then gets that check's output (the last 4,000 characters) and the
 worker's own notes.
 
-Add `--dry-run` first to see the exact command and the first prompt, with no agent called.
+Add `--dry-run` first to see the exact commands (the worker's, and the planner's or the judge's) and the first
+prompt, with no agent called.
 
 Everything the run did is in that `records` folder: `run.json`, the worker's `notes.md`, and
 for each step the exact prompt, the reply, the check output or the judge's reply, and (with
@@ -95,7 +97,26 @@ for each step the exact prompt, the reply, the check output or the judge's reply
 
 - **`--check CMD`** is a shell command the loop runs after every step. Exit 0 means met.
   Tests make the best checks. Use a check whenever a command can tell. This is the only mode that loops
-  on something a model cannot talk its way past.
+  on something a model cannot talk its way past. The loop also runs it once before step 1: a check that
+  already passes then cannot tell done from not done, so the run ends at once as `check_already_passes`
+  (exit 2), and the dry run warns about it. Make it fail first, for example with the failing test.
+- **The re-plan.** When the check fails the same way after two steps in a row (the same exit code and the same
+  last 2,000 characters of output, with timings such as `0.02s`, `12 ms` or `duration_ms: 1.1`, clock times such as
+  `12:03:44,843`, dates and addresses such as `0x7f3a` taken out first), the workers are stuck, and another try from the same notes rarely helps. So before the
+  next step a read-only session of the judge model (`--judge-model`, else `--model`) re-plans: it gets the plan
+  prompt below plus the check, its output, the workers' notes and the last plan, if any. The steps after it get
+  that plan (`NN/plan.md` in the records, next to `NN/plan-prompt.md`). A step right after the pre-check never
+  counts as a repeat, there is no re-plan after the last step or past a limit, a re-plan that uses up the tokens or
+  the time ends the run before the next step, and a failed re-plan call keeps the last plan. `--no-plan` turns it
+  off. The run stays at most `--max-iterations` worker calls (default 4), so at most `--max-iterations` − 2
+  re-plans (2 by default); the report counts them. Any number with a time unit counts as a timing, and any clock
+  time or date is taken out, so two failures that differ only in one (`took 350ms`, then `took 300ms`) count as
+  the same: the price is one re-plan that was not needed. When a run ends with the check failing the way it did
+  after an earlier step, by the same rule, the report's check line says so: `exit 2, the same failure since the
+  pre-check` (or `since step 2`). Since the pre-check, it means no step changed what the check tests: the check
+  or the environment is the problem, not the goal (a test file that cannot even be collected, say), and
+  `notes.md` says what the worker verified instead. The report quotes the start and the end of the worker's
+  last words, where what it did not do or could not verify usually is.
 - **No `--check`** (the default) runs a read-only plan and **one** worker step, then ends as
   `unchecked` (exit 0): nothing verified the result, so run the tests and read the diff yourself. The worker is
   told that nothing checks it and to keep testing its own change until it finds no more problems. Why no loop:
@@ -116,7 +137,8 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   cases workers tend to skip (modifier keys, empty or repeated input, a reset from a state with progress,
   real random values), and one way to verify each part. Only the worker gets it; the judge goes by the goal
   and the files. It names no steps and no order. A failed planning call only means no plan; `--no-plan` skips it.
-  With `--check` there is no plan. It costs one extra read-only session per run.
+  It costs one extra read-only session per run. With `--check` there is no plan before step 1, only the re-plan
+  above, at one read-only session each.
 - **A goal that names a skill** ("use the tiny skill to create hello.txt"), with `--judge`, is
   judged on how the work was done, not only on the result. After each step the loop writes the worker's tool calls
   to `NN/trace.md` in the records, one line per call, in order (`Skill tiny`, `Bash ls`,
@@ -126,10 +148,16 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   requires that the trace does not show, is not met. The trace comes from `claude-code` only for
   now; with opencode there is none, and the judge is told to say it could not see how the work was done.
   A trace line is cut at 160 characters and a long trace loses its middle, and the judge is told not to
-  count a cut line as proof that a step did not happen.
+  count a cut line as proof that a step did not happen. A call the permission layer denied starts with
+  `denied: ` (from the `permission_denials` of claude's result event), so a denied `Skill` call does not count as used.
+  The line shows the call as the worker made it, cut at 160 characters: for a compound shell command the refused part
+  (a `| tail`, a `$?`, a lint command after `;`) is often past the cut, so `denied: Bash <the check>` does not mean the
+  check itself was refused; the worker's reply or notes say what was blocked.
 - **`--protect PATH`** names files the worker and the judge must not touch, such as the tests.
   If the worker changes one, the run stops before anything is checked; if a command the judge
-  runs changes one, the run stops and its verdict does not count.
+  runs changes one, the run stops and its verdict does not count. If a command the re-planner ran changes one,
+  the run stops before the next step. (A file the check itself leaves there, such as an ApprovalTests
+  `.received` file, is seen only after the next worker step, as before.)
 
 The worker's own "I'm done" is printed in the report, but never trusted.
 
@@ -139,12 +167,15 @@ How the worker edits unattended without `--dangerously-skip-permissions`: with t
 provider it runs in Claude Code's `acceptEdits` mode with permission prompts disabled, so it can
 edit files in the folder, run simple file commands there (`mkdir`, `mv`, `cp` and the like),
 and run the check command you pass and your `--allow` rules (with no check, any shell command, and it may read any file, such as its own screenshots).
-Anything else is denied rather than asked, so a run cannot hang waiting for an answer. The
+Anything else is denied rather than asked, so a run cannot hang waiting for an answer. Background tasks are off too
+(`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`): a command that outlives Claude Code's 2-minute Bash timeout fails, instead of
+holding the session open until a notification turn replaces the worker's reply. The
 planner and the judge have no edit tools and may run shell commands in the folder.
 
 - **It runs a coding agent unattended, as you.** The worker edits files in `--dir` and runs
   commands there: with a check, that command and simple file commands (any command with
-  opencode); with no check, any command, and the judge runs commands too. They run as you,
+  opencode), and a re-plan may run any command; with no check, any command, and the planner and the judge run
+  commands too. They run as you,
   unsandboxed, in the folder, so in effect they can run any code you can. Work on a clean git
   tree or a branch you can reset.
   Hooks and MCP servers in that folder run too.
@@ -178,7 +209,8 @@ the report at the end. The safety section applies unchanged.
 - **One measurable end state.** "The tests in `test_x.py` pass", not "improve the code".
 - **A check whenever a command can tell.** Exit 0 is the only road to "met", and the loop
   verifies nothing else: a done criterion left out of the check is checked by no one. Put a
-  compound check (`make test && make lint`) in a script, and `--protect` the script.
+  compound check (`make test && make lint`) in a script, and `--protect` the script. It must fail before
+  the run: one that already passes ends it before any step.
 - **Without a check, and with `--judge`, write done criteria the judge can tick off from the files or from a
   command it runs:** numbered and observable ("README.md has three sections, in this order",
   "`npm test` passes"), never "good docs". "The page opens in a browser without errors" works if a headless browser is
@@ -208,11 +240,12 @@ Every run ends with exactly one named stop reason and an exit code:
 |---|---|---|
 | `goal_met` | The check exited 0, or the judge said met. | 0 |
 | `unchecked` | No `--check` and no `--judge`: one planned step ran and nothing verified it. | 0 |
-| `out_of_iterations` | All N worker calls were made (default 5). | 1 |
+| `check_already_passes` | The check exited 0 before any step, so it cannot tell done from not done. No step ran. | 2 |
+| `out_of_iterations` | All N worker calls were made (default 4). | 1 |
 | `out_of_time` | The wall-clock limit was reached (default 30 minutes). | 1 |
 | `out_of_tokens` | The `--max-tokens` limit was reached. | 1 |
 | `provider_failed` | The agent tool was missing, failed, or returned unreadable output. | 3 |
-| `protected_file_changed` | The worker changed a `--protect` path (nothing is checked), or a command the judge ran did (its verdict does not count). | 3 |
+| `protected_file_changed` | The worker changed a `--protect` path (nothing is checked), or a command the judge ran did (its verdict does not count), or a command the re-planner ran did (seen right after it). | 3 |
 | `interrupted` | You pressed Ctrl+C. | 130 |
 | (bad arguments) | Usage error. No run folder is created. | 2 |
 

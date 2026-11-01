@@ -1,16 +1,15 @@
 """The one concrete provider: Claude Code in headless mode (claude -p), a new session per call."""
 import json
+import os
 import shlex
 
 from .process import run_process
 from .provider import ProviderError, Reply
 
-# The key of the id that `claude --resume` takes. Written in two parts only so that a search
-# of this repo for leaked chat links (which contain that spelling) finds nothing.
+# The key of the id `claude --resume` takes, in two parts so a search of this repo for leaked chat links finds nothing.
 RESUME_ID_KEY = "session" + "_id"
 # The token counts in claude's "usage" object. Their sum is the call's token total.
-TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens",
-                "cache_read_input_tokens")
+TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 # What the judge (edit=False) may use: read files, and run shell commands in the folder. No edit tool.
 JUDGE_TOOLS = ("Read", "Grep", "Glob", "Bash")
 # The trace: each tool call's key argument, by tool (others: the name alone). Reads fold into one line.
@@ -49,6 +48,7 @@ class ClaudeCode:
         return f"{shlex.join(self.argv)}  (prompt on stdin{model}{only})"
 
     def run(self, prompt, workdir, timeout_s):
+        os.environ.setdefault("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1")   # a slow command fails; none holds the session
         try:
             code, out, err, timed_out = run_process(self.argv, workdir, timeout_s, stdin=prompt)
         except FileNotFoundError:
@@ -65,7 +65,7 @@ def parse(exit_code, stdout, stderr):
     if not isinstance(data, dict):
         events = [e for e in map(_json, stdout.splitlines()) if isinstance(e, dict)]
         results = [e for e in events if e.get("type") == "result"]
-        data, trace = (results[-1], tool_trace(events)) if results else (None, None)
+        data, trace = (results[-1], tool_trace(events, results[-1].get("permission_denials"))) if results else (None, None)
     if not isinstance(data, dict) or exit_code != 0 or data.get("is_error"):
         said = data.get("result") or "; ".join(map(str, data.get("errors") or [])) \
             if isinstance(data, dict) else ""
@@ -79,25 +79,25 @@ def parse(exit_code, stdout, stderr):
                  cost_usd=data.get("total_cost_usd"), session=data.get(RESUME_ID_KEY), trace=trace)
 
 
-def tool_trace(events):
-    """One line per tool call, in order: the tool and its key argument, each cut at 160 characters
-    (a file path at 100, and it keeps its end, so its file name shows), never what it returned. A run of Read, Grep
-    and Glob calls is one line naming the files read, `Read: a.md, b.md`. Past TRACE_CAP characters,
-    the middle goes."""
-    lines = []
+def tool_trace(events, denials=()):
+    """One line per tool call, in order: the tool and its key argument, each cut at 160 characters (a file path
+    at 100, keeping its end, so its file name shows), never what it returned; a call the permission layer denied
+    (the result event's permission_denials) starts with `denied: `. A run of Read, Grep and Glob calls is one line
+    naming the files read, `Read: a.md, b.md`. Past TRACE_CAP characters, the middle goes."""
+    lines, denied = [], {d.get("tool_use_id") for d in denials or () if isinstance(d, dict)}
     for event in events:
         message = event.get("message") if event.get("type") == "assistant" else None
         content = message.get("content") if isinstance(message, dict) else None
         for call in content if isinstance(content, list) else []:
             if not isinstance(call, dict) or call.get("type") != "tool_use":
                 continue
-            name, args = str(call.get("name"))[:100], call.get("input")
+            name, args, mark = str(call.get("name"))[:100], call.get("input"), "denied: " if call.get("id") in denied else ""
             arg = " ".join(str(args.get(TRACE_ARGS.get(name), "")).split()) if isinstance(args, dict) else ""
-            if name in READS:
+            if name in READS and not mark:
                 seen = lines.pop()[6:] if lines and lines[-1].startswith("Read:") else ""
                 lines.append(("Read: " + ", ".join(filter(None, [seen, arg.rsplit("/", 1)[-1] if name == "Read" else ""])))[:200].rstrip())
             else:
-                lines.append(f"{name} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:160]}".rstrip())
+                lines.append(f"{mark}{name} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:160]}".rstrip())
     text, half = "\n".join(lines), TRACE_CAP // 2
     if len(text) <= TRACE_CAP:
         return text

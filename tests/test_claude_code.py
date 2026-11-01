@@ -9,6 +9,7 @@ signatures emptied, the temp folder replaced by /tmp, the init event cut to a fe
 the hook, rate-limit and thinking-token events left out.
 """
 import json
+import os
 import sys
 import tempfile
 import time
@@ -56,6 +57,20 @@ class ClaudeCodeTest(unittest.TestCase):
         self.assertNotIn("--model", ClaudeCode().argv)
         for unsafe in ("dangerously-skip-permissions", "bypassPermissions"):     # safety regression
             self.assertNotIn(unsafe, " ".join(argv) + provider.describe())
+
+    def test_C1c_no_background_tasks(self):
+        """A command past its 120 s Bash timeout must fail, not be moved to the background: a background task holds the
+        session open, and its notification starts one more turn whose reply replaces the worker's own (cycle c4, docs)."""
+        seen = []
+
+        def fake_run_process(cmd, cwd, timeout_s, stdin=None):
+            seen.append(os.environ.get("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"))
+            return 0, OK, "", False
+        with mock.patch.dict(os.environ), mock.patch.object(claude_code, "run_process", fake_run_process):
+            os.environ.pop("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", None)
+            for provider in (ClaudeCode(), ClaudeCode(edit=False)):          # the worker, and the judge or planner
+                provider.run("p", Path("."), 60)
+        self.assertEqual(seen, ["1", "1"])
 
     def test_C1b_judge_argv(self):
         seen = []

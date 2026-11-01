@@ -2,6 +2,7 @@
 or a budget ends the run. Read this file first. Nothing in it knows which agent sits behind a provider."""
 import hashlib
 import json
+import re
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -68,7 +69,17 @@ SUSPECTED DEFECTS: what looks wrong or untested in each part, with file and line
 skip (modifier keys, empty or repeated input, a reset from a state with progress, real random values).
 CHECKS: for each part, one line on how to verify it by running it. Give no phases, steps or order: the workers choose.
 """
-WORKER_PLAN_HEAD = "PLAN (made by a read-only planner before step 1: what to cover and what looks wrong; a guide, not steps)"
+STUCK = """
+The workers are stuck: the check failed the same way after two steps in a row. Put why first under SUSPECTED DEFECTS,
+with file and line, then what they keep missing. Never propose changing the check or a protected path ({protected}).
+CHECK (met only when it exits 0; last run: exit {code}): {check}
+{output}
+THE WORKERS' NOTES
+{notes}{plan}\n"""
+FIRST_PLAN = "PLAN (made by a read-only planner before step 1: what to cover and what looks wrong; a guide, not steps)"
+REPLAN = "PLAN (made by a read-only planner after step {}, when the check failed the same way twice; a guide, not steps)"
+# What differs between two runs of one failure, so it does not make a failure new: addresses, dates, clock times, timings
+NOISE = re.compile(r"0x[0-9a-f]+|\d{4}-\d\d-\d\d|\d?\d(:\d\d){2}([.,]\d+)?|duration_ms:? \d[\d.]*|\d[\d.]*\s?(ms|s|sec|seconds)\b", re.I)
 
 
 class StopReason(str, Enum):
@@ -81,16 +92,17 @@ class StopReason(str, Enum):
     PROTECTED_FILE_CHANGED = "protected_file_changed"
     INTERRUPTED = "interrupted"
     UNCHECKED = "unchecked"
+    CHECK_ALREADY_PASSES = "check_already_passes"   # before any step: it cannot tell done from not done
 
     @property
     def exit_code(self):
-        return {"goal_met": 0, "unchecked": 0, "provider_failed": 3, "protected_file_changed": 3,
-                "interrupted": 130}.get(self.value, 1)
+        return {"goal_met": 0, "unchecked": 0, "check_already_passes": 2, "provider_failed": 3,
+                "protected_file_changed": 3, "interrupted": 130}.get(self.value, 1)
 
 
 @dataclass(frozen=True)
 class Limits:
-    max_iterations: int = 5          # always bounded: there is no "unlimited"
+    max_iterations: int = 4          # always bounded: there is no "unlimited"
     max_seconds: float = 30 * 60     # always bounded, checks included
     max_tokens: int | None = None    # enforced only when the provider reports tokens
 
@@ -128,6 +140,8 @@ class Run:
     judge: str | None = None         # judge.describe(); None when a check command is the finish line
     judge_calls: int = 0
     last_verdict: Verdict | None = None
+    replans: int = 0                 # plans made after the check failed the same way twice
+    same_since: int = 0              # the check has printed the same since this step (0: the pre-check)
 
 
 def run_check(check, workdir, timeout_s, step=0):
@@ -141,16 +155,15 @@ def build_prompt(goal, check, protect, notes_path, notes, last, skills=(), plan=
     """The same template every step, built from files, never from chat. `last` is the last CheckResult or Verdict."""
     if len(notes) > NOTES_CAP:
         notes = notes[:NOTES_CAP] + f"\n[... notes cut at {NOTES_CAP:,} characters]"
-    plan = f"{WORKER_PLAN_HEAD}\n{plan}\n\n" if plan else ""
+    plan = f"{plan}\n\n" if plan else ""                         # a plan comes with its PLAN (made ...) line
     if check is None and not judged:      # the one step has no loop to explain, no notes or review to pass on
         keep = f"\nDo not edit these paths (the run stops if they change): {', '.join(protect)}\n" if protect else ""
         return f"{goal.strip()}\n\n{plan}{FINISH_NONE}\n{keep}"
     new = last is None or last.step == 0
     if check is None:
-        finish = FINISH_JUDGE if judged else FINISH_NONE
-        seen = "LAST REVIEW (none yet: this is the first step)" if new else (
-            f"LAST REVIEW (after step {last.step}: a reviewer's opinion, not a command result)\n"
-            f"{last.reasons}")
+        finish = FINISH_JUDGE                           # with no check, only a judged run gets here
+        seen = "LAST REVIEW (none yet: this is the first step)" if new else \
+            f"LAST REVIEW (after step {last.step}: a reviewer's opinion, not a command result)\n{last.reasons}"
     else:
         finish = FINISH_CHECK.format(check=check)
         seen = f"LAST CHECK (after step {last.step}, exit code {last}, last 4,000 characters of output)\n" \
@@ -158,10 +171,9 @@ def build_prompt(goal, check, protect, notes_path, notes, last, skills=(), plan=
     if skills:                                  # a fresh session knows no skill unless it is told
         seen += (f"\n\nSKILLS EARLIER STEPS USED: {', '.join(skills)}. Invoke them again before you change the work "
                  "(the Skill tool shows where their files are); do not search the disk for them.")
-    return PROMPT.format(goal=goal.strip(), finish=finish, protected=", ".join(protect) or "(none)",
-                         notes_path=notes_path, last=seen, plan=plan,
-                         notes=notes.strip() or ("(none yet: this is the first step)" if new
-                                                 else "(none: no notes were left)"))
+    no_notes = "(none yet: this is the first step)" if new else "(none: no notes were left)"
+    return PROMPT.format(goal=goal.strip(), finish=finish, protected=", ".join(protect) or "(none)", plan=plan,
+                         notes_path=notes_path, notes=notes.strip() or no_notes, last=seen)
 
 
 def safe_workdir(path):
@@ -176,7 +188,7 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
              clock=time.monotonic, judge: Provider | None = None, plan: Provider | None = None):
     """Run the loop to its end and return the Run (progress to stderr, the report to stdout). The finish line is
     `check`, a command, or `judge`, a provider built with edit=False; with neither, one step runs, unchecked.
-    `plan`, such a provider too, makes a plan (plan.md) before step 1."""
+    `plan`, such a provider too, plans before step 1, or, with a check, only re-plans after the same failure twice."""
     if check is not None and judge is not None:
         raise ValueError("a run takes a check command or a judge, not both")
     workdir = safe_workdir(workdir)
@@ -210,12 +222,12 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
     if run.check is not None:                                       # step 0: the pre-check
         run.last_check = _check(run, 0)
         if run.last_check.exit_code == 0:
-            return StopReason.GOAL_MET
+            return StopReason.CHECK_ALREADY_PASSES                  # no step could show in it
     traces = {}                                                     # step: its trace.md, as the loop wrote it
-    plan = _plan(run, planner, time_left) if planner else ""
+    plan = _plan(run, planner, time_left, run.folder, FIRST_PLAN) if planner and run.check is None else ""  # a check: re-plans only
     for i in range(1, run.limits.max_iterations + 1):
-        if time_left() <= 0:                                        # a
-            return StopReason.OUT_OF_TIME
+        if stop := _budget(run, time_left):                         # a: no step past a limit, a plan's tokens too
+            return stop
         step, notes = run.folder / f"{i:02d}", run.folder / "notes.md"
         step.mkdir()
         skills = sorted({s[6:].strip() for t in traces.values() for s in t.splitlines() if s.startswith("Skill ")})
@@ -247,9 +259,10 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
         if judge is None and run.check is None:
             return StopReason.UNCHECKED                             # nothing decides: one step, then it ends
         if judge is None:
-            run.last_check = _check(run, i)                         # f: the loop checks, not the agent
+            prev, run.last_check = run.last_check, _check(run, i)   # f: the loop checks, not the agent
             met = run.last_check.exit_code == 0
             said = f"check exit {run.last_check} ({'met' if met else 'not met'})"
+            stuck, run.same_since = (same := same_failure(prev, run.last_check)) and prev.step > 0, run.same_since if same else i
         else:
             if stop := _budget(run, time_left):                     # f: no judge call past a limit
                 return stop
@@ -260,7 +273,7 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
                 return StopReason.OUT_OF_TIME if time_left() <= 0 else StopReason.PROVIDER_FAILED
             if _moved(run, guarded, "judge"):                       # a command it ran moved it
                 return StopReason.PROTECTED_FILE_CHANGED            # before its verdict counts
-            met, said = run.last_verdict.met, f"judge: {run.last_verdict}"
+            met, said, stuck = run.last_verdict.met, f"judge: {run.last_verdict}", False
         print(f"step {i}/{run.limits.max_iterations}  worker {mmss(worker_s)}  "
               f"{count(reply.tokens)} tokens  {said}", file=sys.stderr)
         save(run)
@@ -268,13 +281,22 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
             return StopReason.GOAL_MET
         if stop := _budget(run, time_left):                         # h
             return stop
+        if stuck and planner and i < run.limits.max_iterations:     # i: the same failure twice: re-plan
+            before = fingerprint(run.dir, run.protect)              # what the check left there is not the planner's
+            if new := _replan(run, planner, time_left, step, plan, i):      # a failed call keeps the last plan
+                plan, run.replans = new, run.replans + 1
+            if _moved(run, before, "planner"):                      # a command it ran moved the finish line
+                return StopReason.PROTECTED_FILE_CHANGED
     return StopReason.OUT_OF_ITERATIONS
 
 
+def same_failure(a, b):   # NOISE aside; only the end, as a timing that changes width moves where the tail starts
+    return a.exit_code == b.exit_code and NOISE.sub("", a.output)[-TAIL_CAP // 2:] == NOISE.sub("", b.output)[-TAIL_CAP // 2:]
+
+
 def _moved(run, guarded, who):
-    """True, with run.error set, if a --protect path changed since the run started."""
-    changed = [p for p, digest in fingerprint(run.dir, run.protect).items() if digest != guarded[p]]
-    if changed:
+    """True, with run.error set, if a --protect path changed since `guarded` was taken (at the start, or before a re-plan)."""
+    if changed := [p for p, digest in fingerprint(run.dir, run.protect).items() if digest != guarded[p]]:
         run.error = f"the {who} changed protected paths: " + ", ".join(changed)
     return bool(changed)
 
@@ -282,8 +304,7 @@ def _moved(run, guarded, who):
 def _budget(run, time_left):
     if run.limits.max_tokens and (run.tokens or 0) >= run.limits.max_tokens:
         return StopReason.OUT_OF_TOKENS
-    if time_left() <= 0:
-        return StopReason.OUT_OF_TIME
+    return StopReason.OUT_OF_TIME if time_left() <= 0 else None
 
 
 def _judge(run, judge, step, time_left):
@@ -299,17 +320,30 @@ def _judge(run, judge, step, time_left):
     return parse_verdict(reply.text, run.steps)
 
 
-def _plan(run, planner, time_left):
-    """One read-only session before step 1, recorded as plan.md. A failed call means no plan, not a failed run."""
+def _plan(run, planner, time_left, folder, head, stuck=""):
+    """One read-only session, kept in `folder`, returned under `head`; if it fails: no new plan, not a failed run."""
+    prompt = PLAN_PROMPT.format(goal=run.goal.strip(), workdir=run.dir) + stuck
+    (folder / "plan-prompt.md").write_text(prompt)
     try:
-        reply = planner.run(PLAN_PROMPT.format(goal=run.goal.strip(), workdir=run.dir), run.dir, time_left())
+        reply = planner.run(prompt, run.dir, time_left())
     except ProviderError as error:
-        print(f"plan failed, going on without one: {error}", file=sys.stderr)
+        print(f"plan failed, going on without a new one: {error}", file=sys.stderr)
         return ""
-    (run.folder / "plan.md").write_text(reply.text + "\n")
+    (folder / "plan.md").write_text(reply.text + "\n")
     run.tokens, run.cost_usd = add(run.tokens, reply.tokens), add(run.cost_usd, reply.cost_usd)
     print(f"plan  {count(reply.tokens)} tokens", file=sys.stderr)
-    return reply.text.strip()[:PLAN_CAP]
+    text = reply.text.strip()[:PLAN_CAP]
+    return f"{head}\n{text}" if text else ""
+
+
+def _replan(run, planner, time_left, folder, plan, step):
+    """After `step`, the second same failure in a row: a plan that also sees the check, the notes and the last plan."""
+    notes, last = run.folder / "notes.md", run.last_check
+    stuck = STUCK.format(protected=", ".join(run.protect) or "none", code=last, check=run.check,
+                         output=last.output.strip() or "(no output)",
+                         notes=(notes.read_text()[:NOTES_CAP] if notes.exists() else "").strip() or "(none)",
+                         plan=f"\nTHE LAST PLAN (it did not get them past this)\n{plan}" if plan else "")
+    return _plan(run, planner, time_left, folder, REPLAN.format(step), stuck)
 
 
 def _check(run, step):
@@ -325,14 +359,15 @@ def _check(run, step):
 
 def fingerprint(workdir, paths):
     """One hash per protected path: a file, or every file in a folder. A missing path hashes too."""
-    digests = {}
-    for rel in paths:
-        root, digest = workdir / rel, hashlib.sha256()
-        for f in sorted(root.rglob("*")) if root.is_dir() else [root]:
-            if not f.is_dir() and not {".subgoal", "__pycache__"} & set(f.relative_to(root).parts):
-                digest.update(str(f).encode() + (f.read_bytes() if f.exists() else b"(missing)"))
-        digests[rel] = digest.hexdigest()
-    return digests
+    return {rel: _digest(workdir / rel) for rel in paths}
+
+
+def _digest(root):
+    digest = hashlib.sha256()
+    for f in sorted(root.rglob("*")) if root.is_dir() else [root]:
+        if not f.is_dir() and not {".subgoal", "__pycache__"} & set(f.relative_to(root).parts):
+            digest.update(str(f).encode() + (f.read_bytes() if f.exists() else b"(missing)"))
+    return digest.hexdigest()
 
 
 def add(total, value):
@@ -357,14 +392,15 @@ def mmss(seconds):
 
 def report(run):
     """The final report, printed and saved as report.md. Only the finish line can make it say GOAL MET."""
-    last, limits = run.last_check or run.last_verdict, run.limits
-    judged = run.judge is not None
+    last, limits, judged = run.last_check or run.last_verdict, run.limits, run.judge is not None
     if run.stop_reason is StopReason.GOAL_MET:
-        when = f"after step {last.step}" if last.step else "at the pre-check, before any step"
         said = "a judge said met" if judged else "the check exited 0"
         caveat = ("That is a model's opinion, not a check command's exit code." if judged else
                   "This proves what the check tests and nothing more.")
-        lines = [f"subgoal: GOAL MET {when}: {said}", f"  {caveat} Read the diff."]
+        lines = [f"subgoal: GOAL MET after step {last.step}: {said}", f"  {caveat} Read the diff."]
+    elif run.stop_reason is StopReason.CHECK_ALREADY_PASSES:
+        lines = ["subgoal: CHECK ALREADY PASSES before any step, so it cannot tell done from not done.",
+                 "  No step ran: make it fail first (write the failing test), or the work is already done."]
     elif run.stop_reason is StopReason.UNCHECKED:
         lines = ["subgoal: DONE, NOT CHECKED: one step ran, and nothing verified it. Read the diff and run the tests."]
     else:
@@ -375,32 +411,30 @@ def report(run):
         tokens = "unknown: token limit NOT enforced (provider reported no tokens)"
     cost = "unknown" if run.cost_usd is None else \
         f"${run.cost_usd:.2f} (the provider's own estimate; a subscription is not billed per call)"
-    if run.steps == 0:
+    if run.steps == 0 and run.tokens is None and run.cost_usd is None:      # a plan's numbers still show
         tokens = cost = "none (no worker calls)"
     if judged:
         ran = f"last verdict after step {last.step}: {last}" if last else "no verdict yet"
         finish = f"judge     no check command: an agent with no edit tools decides      {ran}"
     else:
-        ran = f"last run after step {last.step}: exit {last}" if last else "not run"
+        same = f", the same failure since {f'step {run.same_since}' if run.same_since else 'the pre-check'}"   # no step moved it
+        ran = f"last run after step {last.step}: exit {last}{same * (last.step > run.same_since)}" if last else "not run"
         finish = f"check     {run.check or 'none, and no judge'}      {ran}"
-    calls = f" (judge calls: {run.judge_calls})" if judged else ""
+    calls = f" (judge calls: {run.judge_calls})" if judged else f" (re-plans: {run.replans})" if run.replans else ""
     lines += [f"  goal      {' '.join(run.goal.split())}",
               f"  {finish}",
               f"  steps     {run.steps} of {limits.max_iterations} worker calls{calls}",
               f"  time      {mmss(run.seconds)} of {mmss(limits.max_seconds)} "
-              f"({'judge calls' if judged else 'checks'} included)",
+              f"({'judge calls' if judged else 'checks' if run.check else 'all calls'} included)",
               f"  tokens    {tokens}",
               f"  cost      {cost}",
               f"  provider  {run.provider}"]
-    if judged:
-        lines.append(f"  judge via {run.judge}")
+    lines += [f"  judge via {run.judge}"] if judged else []
     lines += [f"  error     {run.error}"] if run.error else []
-    lines += [f"  worker's last words (unverified): \"{' '.join(run.last_words.split())[:300]}\""] if run.last_words is not None else []
-    detail = last and (last.reasons if judged else last.output)
-    if detail and detail.strip():
-        lines.append("  judge's reasons (a model's opinion; last lines):" if judged else
-                     "  check output (tail):")
-        shown = detail.strip().splitlines()
-        lines += [f"    {line}".rstrip() for line in shown[-6:]]
-    lines.append(f"  records   {run.folder}/")
-    return "\n".join(lines)
+    words = f"{w[:150]} [...] {w[-150:]}" if len(w := " ".join((run.last_words or "").split())) > 300 else w   # the end: what it left
+    lines += [f"  worker's last words (unverified): \"{words}\""] if run.last_words is not None else []
+    detail = last and (last.reasons if judged else last.output).strip()
+    if detail:
+        lines.append("  judge's reasons (a model's opinion; last lines):" if judged else "  check output (tail):")
+        lines += [f"    {line}".rstrip() for line in detail.splitlines()[-6:]]
+    return "\n".join(lines + [f"  records   {run.folder}/"])
