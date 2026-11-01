@@ -319,6 +319,12 @@ class JudgeLoopTest(unittest.TestCase):
                      "A fact that is false, or that neither the material nor the goal supports, is a failing part."):
             self.assertIn(said, asked)
 
+    def test_J19_a_document_review_lists_each_fact_it_checked(self):
+        asked = " ".join(judge_prompt("Explain it on a page", "/d", "done", "/d/.subgoal/r/").split())
+        self.assertIn("For a document that states facts, first list each fact you checked, one per line, as true, false or "
+                      "unsupported with the file:line or command that shows it.", asked)
+        self.assertLess(asked.index("first list each fact you checked"), asked.index("Your last line must be"))
+
 
 if __name__ == "__main__":
     unittest.main()

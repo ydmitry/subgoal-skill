@@ -27,10 +27,9 @@ HOW TO REVIEW
 - Check every part of the goal as it is written. A part that neither the files nor a command you run shows is not met,
   and so is a part you could not confirm. Report every failing part you find, not only the first, and say which parts
   you checked and which you did not.
-- If the work is a document that states facts about material in the folder (a page, a report), each fact is part of the
-  goal: check every one you can, not a sample. Run each worked example, number and output it shows, with commands that
-  change nothing, and read the material for each claim about how it behaves. A fact that is false, or that neither the
-  material nor the goal supports, is a failing part.
+- If the work is a document that states facts about material in the folder, each fact is part of the goal: check every one you can,
+  not a sample. Run each worked example, number and output it shows, with commands that change nothing, and read the material for each
+  claim about how it behaves. A fact that is false, or that neither the material nor the goal supports, is a failing part.
 - Run commands in the foreground. A background task starts another turn whose reply replaces yours.
 - You have no browser tool, but a command can drive one if one is installed. For a web page try Python Playwright
   (`python3 -c "import playwright"`) or a headless Chrome or Chromium: open the file at phone width (390 px) and at desktop
@@ -51,7 +50,8 @@ HOW TO REVIEW
   show, is not met. With no trace file, say you could not see how the work was done.
 
 YOUR REPLY
-Give short reasons that name what is missing, or what shows each part holds.
+Give short reasons that name what is missing, or what shows each part holds. For a document that states facts, first
+list each fact you checked, one per line, as true, false or unsupported with the file:line or command that shows it.
 Your last line must be exactly one of these lines, with nothing after it:
 {met}
 {not_met}
