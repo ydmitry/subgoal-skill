@@ -256,7 +256,7 @@ Every run ends with exactly one named stop reason and an exit code:
 | `stuck` | The step that got a re-plan failed the check the same way again: the new plan did not help, so more steps from the same notes would not either. | 1 |
 | `provider_failed` | The agent tool was missing, failed, or returned unreadable output. | 3 |
 | `protected_file_changed` | The worker changed a `--protect` path (nothing is checked), or a command the judge ran did (its verdict does not count), or a command the re-planner ran did (seen right after it). | 3 |
-| `interrupted` | You pressed Ctrl+C. | 130 |
+| `interrupted` | You pressed Ctrl+C, or the loop got SIGTERM (`kill`, a supervisor's timeout); the running agent or check is stopped too. | 130 |
 | (bad arguments) | Usage error. No run folder is created. | 2 |
 
 ## Reading or changing the code

@@ -314,8 +314,7 @@ def _judge(run, judge, step, time_left):
     run.judge_calls += 1
     reply = judge.run(prompt, run.dir, time_left())
     (step / "judge.md").write_text(reply.text + "\n")
-    write_json(step / "judge-call.json", dict(asdict(reply), text="(judge.md)", trace=None,
-                                              seconds=round(time.monotonic() - began)))
+    write_json(step / "judge-call.json", dict(asdict(reply), text="(judge.md)", trace=None, seconds=round(time.monotonic() - began)))
     run.tokens, run.cost_usd = add(run.tokens, reply.tokens), add(run.cost_usd, reply.cost_usd)
     return parse_verdict(reply.text, run.steps)
 

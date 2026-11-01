@@ -1,5 +1,6 @@
 """The command line: read the arguments, build the provider, run the loop, exit with its code."""
 import argparse
+import signal
 from pathlib import Path
 
 from .claude_code import ClaudeCode
@@ -18,8 +19,7 @@ safety:     the worker edits DIR and runs commands there as you, unsandboxed; th
 
 
 def parse_args(argv=None):
-    p = argparse.ArgumentParser(
-        prog="python3 -m subgoal", epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
+    p = argparse.ArgumentParser(prog="python3 -m subgoal", epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Call a coding agent in fresh sessions until --check exits 0 (or --judge says met) or a budget ends.")
     p.add_argument("--dir", required=True, help="the folder the agent works in (never $HOME or /)")
     goal = p.add_mutually_exclusive_group(required=True)
@@ -56,6 +56,7 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    signal.signal(signal.SIGTERM, signal.default_int_handler)      # kill or a supervisor's stop ends the run as Ctrl+C does
     args = parse_args(argv)
     allow = [f"Bash({args.check})"] if args.check is not None else ["Bash", "Read"]     # no check: any command
     provider = PROVIDERS[args.provider](model=args.model, allow=allow + args.allow)

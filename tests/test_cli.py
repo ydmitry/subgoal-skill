@@ -1,7 +1,12 @@
 """The command line: dry run, argument guards, and the size budget of the core."""
 import io
+import os
 import shutil
+import signal
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -136,6 +141,23 @@ class CliTest(unittest.TestCase):
         self.assertEqual(allowed, ["Bash(make test)", "Bash(npm run lint)"])    # the check and --allow, no more
         self.assertNotIn("Bash", allowed)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "acceptEdits")
+
+    def test_X9_a_stop_signal_also_stops_what_the_loop_started(self):
+        """SIGTERM (kill, a supervisor's timeout) stops the running check or agent, as Ctrl+C does, and the run ends interrupted."""
+        root = CORE.parent
+        loop = subprocess.Popen([sys.executable, "-m", "subgoal", "--dir", str(self.dir), "--goal", "Wait.",
+                                 "--check", "echo $$ > group.pid; sleep 60"], cwd=root, stdout=subprocess.PIPE, text=True)
+        pid = self.dir / "group.pid"
+        for _ in range(200):
+            if pid.exists() and pid.read_text().strip():
+                break
+            time.sleep(0.05)
+        loop.send_signal(signal.SIGTERM)
+        out, _ = loop.communicate(timeout=30)
+        group = int(pid.read_text())
+        self.assertRaises(ProcessLookupError, os.killpg, group, 0)       # nothing the check started is left running
+        self.assertEqual(loop.returncode, StopReason.INTERRUPTED.exit_code)
+        self.assertIn("interrupted", out)
 
     def test_S1_size_budget(self):
         def count(f):
