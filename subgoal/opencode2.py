@@ -69,7 +69,7 @@ class OpenCode2:
         code, out, err, timed_out = run_process(self.argv, workdir, timeout_s, stdin=prompt)
         if timed_out:
             raise ProviderError(f"no reply within {timeout_s:.0f}s; the call was stopped")
-        return parse(code, out, err)
+        return parse(code, out, err, workdir)
 
 
 def check_version(executable, workdir):

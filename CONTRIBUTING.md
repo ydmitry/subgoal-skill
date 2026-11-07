@@ -65,9 +65,10 @@ A provider is a class that satisfies [`subgoal/provider.py`](subgoal/provider.py
 - `Reply.trace` is optional: one short line per tool call the agent made, in order (the tool and
   its key argument, never what the call returned), or `None` when you do not report them.
   The loop writes it to the step's `NN/trace.md`, where the judge reads it when the goal names
-  a skill. Build it with `claude_code.trace()`, which takes each call as Claude Code's tool name,
-  its input under Claude Code's keys, and a mark (`denied: `, `failed: ` or none), so the judge
-  reads one format; `opencode.call()` shows the mapping for opencode's names and keys.
+  a skill. Build it with `claude_code.trace(calls, workdir)`, which takes each call as Claude Code's
+  tool name, its input under Claude Code's keys, and a mark (`denied: `, `failed: ` or none), and
+  shows a file path inside `workdir` relative to it, so the judge reads one format;
+  `opencode.call()` shows the mapping for opencode's names and keys.
 
 Then register it in `PROVIDERS` in [`subgoal/cli.py`](subgoal/cli.py). The loop does not
 change. [`subgoal/opencode.py`](subgoal/opencode.py) is a good model to copy: permissions

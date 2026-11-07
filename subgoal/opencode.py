@@ -55,10 +55,10 @@ class OpenCode:
             raise ProviderError(f"no reply within {timeout_s:.0f}s; the call was stopped")
         if code and "Unrecognized flag: --dir" in err:
             raise ProviderError("this looks like opencode 2, which has no --dir: use --provider opencode2")
-        return parse(code, out, err)
+        return parse(code, out, err, workdir)
 
 
-def parse(exit_code, stdout, stderr):
+def parse(exit_code, stdout, stderr, workdir=None):
     """Map opencode's JSON events, one per line, onto a Reply. Anything unusable raises ProviderError."""
     try:
         events = [json.loads(line) for line in stdout.splitlines() if line.strip()]
@@ -90,7 +90,7 @@ def parse(exit_code, stdout, stderr):
     counted = [n for n in tokens if n is not None]
     return Reply(text=reply, tokens=sum(counted) if counted else None,
                  cost_usd=cost or None,                 # 0 is what opencode says when it has no price
-                 session=next((e["sessionID"] for e in events if e.get("sessionID")), None), trace=trace(calls))
+                 session=next((e["sessionID"] for e in events if e.get("sessionID")), None), trace=trace(calls, workdir))
 
 
 def call(part):

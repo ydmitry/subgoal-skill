@@ -27,6 +27,7 @@ from fake import fake_opencode, gone, opencode_match
 from subgoal.cli import main
 from subgoal.opencode2 import AGENT, JUDGE_RULES, WORKER_RULES, OpenCode2
 from subgoal.opencode import parse
+from test_opencode import step, tool
 from subgoal.provider import ProviderError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -138,6 +139,15 @@ class OpenCode2Test(unittest.TestCase):
         provider = OpenCode2(executable=self.fake([{"stderr": "Error: Agent not found", "exit": 1}]))
         with self.assertRaisesRegex(ProviderError, r"exit 1\): Error: Agent not found"):
             provider.run("hi", self.dir, 30)
+
+    def test_P4a_paths_in_the_folder(self):
+        """opencode 2's `path` inside the folder reads relative to it; run() passes its folder."""
+        root = self.dir.resolve()
+        calls = tool("write", {"path": f"{root}/app.txt"}) + tool("read", {"path": "/elsewhere/b.txt"}, "error")
+        calls += tool("read", {"path": f"{root}/c.txt"}, "error")                        # a marked read keeps its path
+        provider = OpenCode2(executable=self.fake([{"stdout": calls + step("Done.")}]))
+        self.assertEqual(provider.run("p", root, 30).trace.splitlines(), ["Write app.txt", "failed: Read /elsewhere/b.txt",
+                                                                         "failed: Read c.txt"])
 
     def test_P4b_which_opencode(self):
         path = os.pathsep.join([str(self.bin), "/usr/bin", "/bin"])

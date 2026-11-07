@@ -139,6 +139,17 @@ class OpenCodeTest(unittest.TestCase):
             {"tool": ["read"], "state": "x"}, {"tool": {"a": 1}}, {"tool": "write", "state": {"input": [1]}}))
         self.assertEqual(parse(0, odd + step("Done."), "").trace.splitlines(), ["['read']", "{'a': 1}", "Write"])
 
+    def test_O2c_paths_in_the_folder(self):
+        """A file path inside the folder reads relative to it, as in Claude Code's trace; run() passes its folder."""
+        root = self.dir.resolve()
+        patch = f"*** Begin Patch\n*** Update File: {root}/app.txt\n@@\n-todo\n+done\n*** Add File: {root}/sub/b.txt\n+b\n*** End Patch"
+        calls = (tool("write", {"filePath": f"{root}/app.txt"}) + tool("edit", {"filePath": "/elsewhere/b.txt"})
+                 + tool("bash", {"command": f"cat {root}/app.txt"}) + tool("apply_patch", {"patchText": patch}))
+        provider = OpenCode(executable=self.fake([{"stdout": calls + step("Done.")}]))
+        self.assertEqual(provider.run("p", root, 60).trace.splitlines(),
+                         ["Write app.txt", "Edit /elsewhere/b.txt", "Bash " + f"cat {root}/app.txt"[:160],
+                          "Edit app.txt, sub/b.txt"])                        # a patch: each of its files
+
     def test_O3_error_event(self):
         with self.assertRaisesRegex(ProviderError, r"exit 1\): scripted failure$"):
             parse(1, ERROR, "")

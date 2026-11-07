@@ -162,7 +162,8 @@ the worker's tool calls.
 - **A goal that names a skill** ("use the tiny skill to create hello.txt"), with `--judge`, is
   judged on how the work was done, not only on the result. After each step the loop writes the worker's tool calls
   to `NN/trace.md` in the records, one line per call, in order (`Skill tiny`, `Bash ls`,
-  `Write /path/hello.txt`, a run of reads as one line naming the files, `Read: planning.md, gates.md`), never what a call returned. The worker
+  `Write hello.txt`, a file path inside `--dir` relative to it, a run of reads as one line naming the files,
+  `Read: planning.md, gates.md`), never what a call returned. The worker
   could edit those files, so after every step the loop writes them all back from its own copy. The judge
   reads the skill's `SKILL.md` and that trace: a skill that was never invoked, or a step it
   requires that the trace does not show, is not met. Every provider writes it in Claude Code's tool names where one exists, so

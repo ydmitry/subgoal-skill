@@ -141,6 +141,29 @@ class ClaudeCodeTest(unittest.TestCase):
         self.assertEqual(tool_trace([]), "")
         self.assertEqual(parse(0, OK.replace('"tool_use"', '"no_tool"'), "").trace, "")   # no calls: empty, not None
 
+    def test_C2e_paths_in_the_folder(self):
+        """A file path inside the folder the call ran in reads relative to it, so a deep folder cannot cut a line mid-name.
+        A path anywhere else, the folder itself, and a command stay as they were."""
+        root = "/w/" + "deep/" * 30 + "proj"
+        calls = (("Write", {"file_path": f"{root}/tests/test_a.py"}), ("Edit", {"file_path": f"{root}2/b.py"}),
+                 ("Edit", {"file_path": "/elsewhere/c.py"}), ("Bash", {"command": f"cat {root}/a.py"}),
+                 ("Bash", {"command": f"{root}/check.sh --fast"}),
+                 ("Read", {"file_path": f"{root}/notes.md"}), ("Edit", {"file_path": root}), ("Edit", {"file_path": f"{root}/src/b.py"}),
+                 ("Edit", {"file_path": root + "/"}))
+        expected = ["Write tests/test_a.py", "Edit " + f"{root}2/b.py"[-100:], "Edit /elsewhere/c.py",
+                    "Bash " + f"cat {root}/a.py"[:160],
+                    "Bash " + f"{root}/check.sh --fast"[:160], "Read: notes.md", "Edit " + root[-100:], "Edit src/b.py",
+                    "Edit " + (root + "/")[-100:]]                                  # the folder itself keeps its path
+        stream = "".join(json.dumps(e) + "\n" for e in tool_calls(*calls)) + json.dumps(RESULT) + "\n"
+        with mock.patch.object(claude_code, "run_process", lambda cmd, cwd, timeout_s, stdin=None: (0, stream, "", False)):
+            self.assertEqual(ClaudeCode().run("p", Path(root), 60).trace.splitlines(), expected)    # run() passes its folder
+        marked = tool_calls(("Write", {"file_path": f"{root}/x.py"}), ("Read", {"file_path": f"{root}/r.md"}))
+        denied = tool_trace(marked, [{"tool_use_id": "t0"}, {"tool_use_id": "t1"}], Path(root))
+        self.assertEqual(denied.splitlines(), ["denied: Write x.py", "denied: Read r.md"])
+        spaced = tool_calls(("Write", {"file_path": "/w/my  proj/a.py"}))                  # args have their whitespace collapsed
+        self.assertEqual(tool_trace(spaced, (), Path("/w/my  proj")), "Write a.py")
+        self.assertEqual(tool_trace(tool_calls(*calls[:1])), "Write " + f"{root}/tests/test_a.py"[-100:])    # no folder given
+
     def test_C2d_trace_cap(self):
         lines = [f"Bash echo {i:04d} " + "x" * 30 for i in range(300)]
         trace = tool_trace(tool_calls(*[("Bash", {"command": line[5:]}) for line in lines]))

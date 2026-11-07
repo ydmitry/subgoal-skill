@@ -6,8 +6,7 @@ import shlex
 from .process import run_process
 from .provider import ProviderError, Reply
 
-# The key of the id `claude --resume` takes, in two parts so a search of this repo for leaked chat links finds nothing.
-RESUME_ID_KEY = "session" + "_id"
+RESUME_ID_KEY = "session" + "_id"      # the id `claude --resume` takes, in two parts so a search for leaked chat links finds none
 # The token counts in claude's "usage" object. Their sum is the call's token total.
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 # What the judge (edit=False) may use: read files, and run shell commands in the folder. No edit tool.
@@ -55,17 +54,17 @@ class ClaudeCode:
             raise ProviderError(f"{self.argv[0]} not found: is Claude Code on PATH?") from None
         if timed_out:
             raise ProviderError(f"no reply within {timeout_s:.0f}s; the call was stopped")
-        return parse(code, out, err)
+        return parse(code, out, err, workdir)
 
 
-def parse(exit_code, stdout, stderr):
+def parse(exit_code, stdout, stderr, workdir=None):
     """Map claude's output onto a Reply: the last result event of the stream, and the trace from
-    its tool calls, or one JSON object (`--output-format json`, no trace). Unusable: ProviderError."""
+    its tool calls (see trace()), or one JSON object (`--output-format json`, no trace). Unusable: ProviderError."""
     data, trace, events = _json(stdout), None, []
     if not isinstance(data, dict):
         events = [e for e in map(_json, stdout.splitlines()) if isinstance(e, dict)]
         results = [e for e in events if e.get("type") == "result"]
-        data, trace = (results[-1], tool_trace(events, results[-1].get("permission_denials"))) if results else (None, None)
+        data, trace = (results[-1], tool_trace(events, results[-1].get("permission_denials"), workdir)) if results else (None, None)
     if not isinstance(data, dict) or exit_code != 0 or data.get("is_error"):
         said = data.get("result") or "; ".join(map(str, data.get("errors") or [])) \
             if isinstance(data, dict) else ""
@@ -79,27 +78,28 @@ def parse(exit_code, stdout, stderr):
                  cost_usd=data.get("total_cost_usd"), session=data.get(RESUME_ID_KEY), trace=trace)
 
 
-def tool_trace(events, denials=()):
+def tool_trace(events, denials=(), workdir=None):
     """claude's tool calls as trace lines; one the permission layer denied (permission_denials) is marked `denied: `."""
     denied = {d.get("tool_use_id") for d in denials or () if isinstance(d, dict)}
     blocks = [e["message"].get("content") for e in events if e.get("type") == "assistant" and isinstance(e.get("message"), dict)]
     return trace([(str(c.get("name")), c.get("input"), "denied: " * (c.get("id") in denied)) for b in blocks
-                  if isinstance(b, list) for c in b if isinstance(c, dict) and c.get("type") == "tool_use"])
+                  if isinstance(b, list) for c in b if isinstance(c, dict) and c.get("type") == "tool_use"], workdir)
 
 
-def trace(calls):
+def trace(calls, workdir=None):
     """Every provider's trace, so the judge reads one format: per (Claude Code tool name, input, mark) call, in order,
-    one line: the mark, the tool and its key argument, cut at 160 characters (a file path at 100, keeping its end, so
-    its file name shows), never what it returned. A run of unmarked Read, Grep and Glob calls is one line naming the
-    files read, `Read: a.md, b.md`. Past TRACE_CAP characters, the middle goes."""
-    lines = []
+    one line: the mark, the tool and its key argument, cut at 160 characters (a file path at 100, keeping its end so its
+    file name shows; inside workdir, the folder the call ran in, relative to it, as is each of a patch's files), never
+    what it returned. A run of unmarked Read, Grep and Glob calls is one line, `Read: a.md, b.md`. Past TRACE_CAP, the middle goes."""
+    lines, root = [], " ".join(f"{workdir}/".split()) if workdir else ""     # whitespace collapsed, as in the args
     for name, args, mark in calls:
         arg = " ".join(str(args.get(TRACE_ARGS.get(name), "")).split()) if isinstance(args, dict) else ""
         if name in READS and not mark:
             seen = lines.pop()[6:] if lines and lines[-1].startswith("Read:") else ""
             lines.append(("Read: " + ", ".join(filter(None, [seen, arg.rsplit("/", 1)[-1] if name == "Read" else ""])))[:200].rstrip())
-        else:
-            lines.append(f"{mark}{name[:100]} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:160]}".rstrip())
+        else:                                                   # a command stays as written; the folder itself too
+            arg = (arg.replace(", " + root, ", ").removeprefix(root) or arg)[-100:] if TRACE_ARGS.get(name) == "file_path" else arg[:160]
+            lines.append(f"{mark}{name[:100]} {arg}".rstrip())
     text, half = "\n".join(lines), TRACE_CAP // 2
     if len(text) <= TRACE_CAP:
         return text
