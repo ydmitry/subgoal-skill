@@ -80,24 +80,26 @@ def parse(exit_code, stdout, stderr):
 
 
 def tool_trace(events, denials=()):
-    """One line per tool call, in order: the tool and its key argument, each cut at 160 characters (a file path
-    at 100, keeping its end, so its file name shows), never what it returned; a call the permission layer denied
-    (the result event's permission_denials) starts with `denied: `. A run of Read, Grep and Glob calls is one line
-    naming the files read, `Read: a.md, b.md`. Past TRACE_CAP characters, the middle goes."""
-    lines, denied = [], {d.get("tool_use_id") for d in denials or () if isinstance(d, dict)}
-    for event in events:
-        message = event.get("message") if event.get("type") == "assistant" else None
-        content = message.get("content") if isinstance(message, dict) else None
-        for call in content if isinstance(content, list) else []:
-            if not isinstance(call, dict) or call.get("type") != "tool_use":
-                continue
-            name, args, mark = str(call.get("name"))[:100], call.get("input"), "denied: " if call.get("id") in denied else ""
-            arg = " ".join(str(args.get(TRACE_ARGS.get(name), "")).split()) if isinstance(args, dict) else ""
-            if name in READS and not mark:
-                seen = lines.pop()[6:] if lines and lines[-1].startswith("Read:") else ""
-                lines.append(("Read: " + ", ".join(filter(None, [seen, arg.rsplit("/", 1)[-1] if name == "Read" else ""])))[:200].rstrip())
-            else:
-                lines.append(f"{mark}{name} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:160]}".rstrip())
+    """claude's tool calls as trace lines; one the permission layer denied (permission_denials) is marked `denied: `."""
+    denied = {d.get("tool_use_id") for d in denials or () if isinstance(d, dict)}
+    blocks = [e["message"].get("content") for e in events if e.get("type") == "assistant" and isinstance(e.get("message"), dict)]
+    return trace([(str(c.get("name")), c.get("input"), "denied: " * (c.get("id") in denied)) for b in blocks
+                  if isinstance(b, list) for c in b if isinstance(c, dict) and c.get("type") == "tool_use"])
+
+
+def trace(calls):
+    """Every provider's trace, so the judge reads one format: per (Claude Code tool name, input, mark) call, in order,
+    one line: the mark, the tool and its key argument, cut at 160 characters (a file path at 100, keeping its end, so
+    its file name shows), never what it returned. A run of unmarked Read, Grep and Glob calls is one line naming the
+    files read, `Read: a.md, b.md`. Past TRACE_CAP characters, the middle goes."""
+    lines = []
+    for name, args, mark in calls:
+        arg = " ".join(str(args.get(TRACE_ARGS.get(name), "")).split()) if isinstance(args, dict) else ""
+        if name in READS and not mark:
+            seen = lines.pop()[6:] if lines and lines[-1].startswith("Read:") else ""
+            lines.append(("Read: " + ", ".join(filter(None, [seen, arg.rsplit("/", 1)[-1] if name == "Read" else ""])))[:200].rstrip())
+        else:
+            lines.append(f"{mark}{name[:100]} {arg[-100:] if TRACE_ARGS.get(name) == 'file_path' else arg[:160]}".rstrip())
     text, half = "\n".join(lines), TRACE_CAP // 2
     if len(text) <= TRACE_CAP:
         return text

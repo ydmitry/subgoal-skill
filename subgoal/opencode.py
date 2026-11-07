@@ -1,12 +1,16 @@
 """A second provider: opencode in non-interactive mode (opencode run), a new session per call."""
 import json
+import re
 import shlex
 import shutil
 
+from .claude_code import trace
 from .process import run_process
 from .provider import ProviderError, Reply
 
 AGENT = "subgoal"    # every call runs as this agent, which the call's own config defines
+NAMES = {"read": "Read", "glob": "Glob", "grep": "Grep", "write": "Write", "edit": "Edit", "patch": "Edit",   # for the
+         "apply_patch": "Edit", "bash": "Bash", "shell": "Bash", "skill": "Skill", "task": "Task"}    # trace: Claude Code's
 # opencode asks before these by default. `opencode run` rejects every ask, and a rejection ends
 # the session, so the worker is told no instead and goes on: no paths outside the folder.
 WORKER_RULES = {"external_directory": "deny", "doom_loop": "deny"}
@@ -63,13 +67,14 @@ def parse(exit_code, stdout, stderr):
     if events is None or not all(isinstance(e, dict) for e in events):
         detail = stderr.strip()[-2000:] or stdout.strip()[-2000:]
         raise ProviderError(f"opencode run printed lines that are not JSON events (exit {exit_code}): {detail}")
-    text, tokens, cost, errors = [], [], 0.0, []
+    text, tokens, cost, errors, calls = [], [], 0.0, [], []
     for event in events:
         part = event.get("part") if isinstance(event.get("part"), dict) else {}
         if event.get("type") == "step_start":
             text = []                                   # the reply is the last step's words only
         elif event.get("type") == "text" and isinstance(part.get("text"), str):
             text.append(part["text"])
+        elif event.get("type") == "tool_use": calls.append(call(part))        # one per call, as it ends
         elif event.get("type") == "step_finish":
             tokens.append(step_tokens(part.get("tokens")))
             cost += part.get("cost") if isinstance(part.get("cost"), (int, float)) else 0
@@ -85,7 +90,17 @@ def parse(exit_code, stdout, stderr):
     counted = [n for n in tokens if n is not None]
     return Reply(text=reply, tokens=sum(counted) if counted else None,
                  cost_usd=cost or None,                 # 0 is what opencode says when it has no price
-                 session=next((e["sessionID"] for e in events if e.get("sessionID")), None))
+                 session=next((e["sessionID"] for e in events if e.get("sessionID")), None), trace=trace(calls))
+
+
+def call(part):
+    """A tool call for the trace: Claude Code's names and keys (a patch's files as its path), `failed: ` if it erred."""
+    state, tool = part.get("state") if isinstance(part.get("state"), dict) else {}, part.get("tool")
+    a = state.get("input") if isinstance(state.get("input"), dict) else {}
+    patched = ", ".join(re.findall(r"^\*\*\* \w+ File: (.+)$", str(a.get("patchText", "")), re.M))
+    return (NAMES.get(tool, tool) if isinstance(tool, str) else str(tool), {"file_path": a.get("filePath") or a.get("path")
+            or patched, "command": a.get("command"), "skill": a.get("name"), "description": a.get("description")},
+            "failed: " * (state.get("status") == "error"))       # denied, or it erred: either way it did not happen
 
 
 def step_tokens(tokens):

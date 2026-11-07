@@ -91,8 +91,8 @@ Add `--dry-run` first to see the exact commands (the worker's, and the planner's
 prompt, with no agent called.
 
 Everything the run did is in that `records` folder: `run.json`, the worker's `notes.md`, and
-for each step the exact prompt, the reply, the check output or the judge's reply, and (with
-`claude-code`) `trace.md`, the worker's tool calls.
+for each step the exact prompt, the reply, the check output or the judge's reply, and `trace.md`,
+the worker's tool calls.
 
 ## Who says "done": a check, nobody, a judge, or a check and then a judge
 
@@ -165,11 +165,12 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   `Write /path/hello.txt`, a run of reads as one line naming the files, `Read: planning.md, gates.md`), never what a call returned. The worker
   could edit those files, so after every step the loop writes them all back from its own copy. The judge
   reads the skill's `SKILL.md` and that trace: a skill that was never invoked, or a step it
-  requires that the trace does not show, is not met. The trace comes from `claude-code` only for
-  now; with opencode there is none, and the judge is told to say it could not see how the work was done.
+  requires that the trace does not show, is not met. Every provider writes it in Claude Code's tool names where one exists, so
+  an opencode worker's `skill`, `shell` or `apply_patch` call reads `Skill`, `Bash` or `Edit` (a patch names its files).
   A trace line is cut at 160 characters and a long trace loses its middle, and the judge is told not to
   count a cut line as proof that a step did not happen. A call the permission layer denied starts with
-  `denied: ` (from the `permission_denials` of claude's result event), so a denied `Skill` call does not count as used.
+  `denied: ` (from the `permission_denials` of claude's result event); an opencode call that was denied or erred
+  starts with `failed: `. Neither counts as a skill used.
   The line shows the call as the worker made it, cut at 160 characters: for a compound shell command the refused part
   (a `| tail`, a `$?`, a lint command after `;`) is often past the cut, so `denied: Bash <the check>` does not mean the
   check itself was refused; the worker's reply or notes say what was blocked.
@@ -249,8 +250,8 @@ the report at the end. The safety section applies unchanged.
 
 `--provider` sets the worker's tool, and `--judge-provider` the judge's and the planner's (default: the same), so
 an opencode worker can have a Claude Code judge. `--judge-model` defaults to `--model` only when the two tools are
-the same, since a model name belongs to one tool; otherwise the judge's tool uses its own default. An opencode worker
-reports no tool calls, so with it the judge cannot see how the work was done (see the skill bullet above).
+the same, since a model name belongs to one tool; otherwise the judge's tool uses its own default. An opencode
+worker's tool calls go to `NN/trace.md` like Claude Code's (see the skill bullet above).
 
 Works with a recent Claude Code (last tried with 2.1.310), opencode 1.x (1.19.3) and opencode 2 (2.1.4).
 For opencode 2 the provider uses `opencode2` if it is on your PATH (its installer adds one), else `opencode`,

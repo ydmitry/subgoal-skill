@@ -123,6 +123,10 @@ class OpenCode2Test(unittest.TestCase):
         self.assertTrue(reply.session.startswith("ses_"))
         judged = parse(0, JUDGE, "")
         self.assertEqual((judged.text, judged.tokens), ("app.txt says done.\nVERDICT: met", 7 * 110))
+        self.assertEqual(reply.trace, "failed: Write /tmp/outside/escaped.txt\nRead: app.txt\nWrite app.txt")
+        self.assertEqual(judged.trace.splitlines(), [                       # opencode 2's names: path, shell, patch
+            "failed: Write app.txt", "failed: Edit app.txt", "failed: Edit judge.txt", "failed: Bash cat /etc/hosts",
+            "Bash grep -q done app.txt && echo passed", "Read: app.txt", "Bash git status --short"])
 
     def test_P3_error_event(self):
         with self.assertRaisesRegex(ProviderError, r"exit 1\): scripted failure$"):

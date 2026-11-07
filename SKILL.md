@@ -12,9 +12,10 @@ description: Use for a task in a folder that needs more than a few tool calls. W
 | The work | Use | What happens |
 |---|---|---|
 | A command can tell it is done (tests, a build, a script) | `--check CMD` | Up to 4 fresh worker sessions until CMD exits 0: the only finish line a model cannot talk past. The same failure twice in a row brings a read-only re-plan. |
-| A bug, or a feature a test can pin | Write the failing test first, then `--check` and `--protect` it | The same loop, now with a check. |
+| A bug, or a feature a test can pin | The failing test first: write it, or have a run write it (`--no-plan`, `--protect` the code, goal: "add a test for X that fails now"). Run it, see it fail for the right reason, show the user the test and get a yes. Then `--check` it and `--protect` it | The same loop, aimed at a bar the user approved, not one the worker set. |
 | Nothing can check it (a page, a refactor, prose) | No flag; add `--no-plan` if the change is small and exact | A read-only plan (none with `--no-plan`), then one step; ends `unchecked`. Read the diff yourself. |
 | The goal names a skill or a way of working, or has parts no command can tell | `--judge`, plus `--check` for the parts a command can tell | Loops on a model's opinion, drawn from the files and the tool calls (`NN/trace.md`); with a check, asked only once it exits 0, so met needs both. Not for bugs: it accepted wrong fixes. |
+| Stages of different kinds (find out, then build, then explain) | One run per stage, each with its own finish line from the rows above, one after another | A stage that finds things out writes them to a file. Read each report and diff before the next run, and name the files the last stage made in the next goal. Runs at the same time need a folder each (a git worktree). |
 
 - **Goal:** a few short lines of observable done criteria, plus any constraint ("without editing the tests").
 - **Check:** a command or script (`--check ./check.sh`; `&&` or `|` go in a script) that fails now and exits 0 only when the goal holds. One that already passes ends the run before any step (`check_already_passes`), unless `--judge` follows (then it guards); the dry run says so. The worker may run only that exact command: `--allow 'Bash(pytest:*)'` (your test runner) lets it look for regressions.
@@ -34,7 +35,8 @@ first prompt, and get a yes. Then run it without `--dry-run`, as a background co
 
 ## 3. Read the result
 
-You are told when the background command exits. Read its report, then act on its exit code:
+You are told when the background command exits. Read its report (the records are in `<dir>/.subgoal/<run-id>/`:
+`report.md`, `run.json`, `notes.md`, one `NN/` per step), then act on its exit code:
 
 | Exit | Stop reason | Next |
 |---|---|---|
@@ -43,8 +45,6 @@ You are told when the background command exits. Read its report, then act on its
 | 2 | bad arguments, check_already_passes | Fix the command. A check that passes before any step cannot tell done from not done: make it fail first. |
 | 3 | provider_failed, protected_file_changed | Quote the error. For a protected change, show the diff. |
 | 130 | interrupted | Stop. |
-
-Records are in `<dir>/.subgoal/<run-id>/`: `report.md`, `run.json`, `notes.md`, one `NN/` per step.
 
 ## Safety
 

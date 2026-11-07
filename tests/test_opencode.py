@@ -49,6 +49,12 @@ def step(text, tokens=110, cost=0):
     return "".join(json.dumps(event) + "\n" for event in events)
 
 
+def tool(name, args, status="completed"):
+    """One tool call of `opencode run --format json`, as it ends."""
+    return json.dumps({"type": "tool_use", "sessionID": "ses_x", "part": {
+        "type": "tool", "tool": name, "state": {"status": status, "input": args}}}) + "\n"
+
+
 class OpenCodeTest(unittest.TestCase):
     def setUp(self):
         self.bin, self.dir = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
@@ -116,6 +122,23 @@ class OpenCodeTest(unittest.TestCase):
         later = parse(0, step("Let me look.", cost=0.25) + step("Done.", cost=0.25), "")
         self.assertEqual((later.text, later.tokens, later.cost_usd), ("Done.", 220, 0.5))   # the last step's words
 
+    def test_O2b_trace(self):
+        """The tool calls as trace lines in Claude Code's tool names, so the judge and the loop read one format."""
+        self.assertEqual(parse(0, OK, "").trace, "failed: Write /tmp/outside/escaped.txt\nRead: app.txt\nWrite app.txt")
+        self.assertEqual(parse(0, JUDGE, "").trace.splitlines(), [
+            "failed: Write app.txt", "failed: Edit app.txt", "failed: Edit judge.txt",    # apply_patch: the patch's files
+            "Bash grep -q done app.txt && echo passed", "Read: app.txt", "Bash git status --short"])
+        calls = [tool("skill", {"name": "tiny"}), tool("skill", {"name": "nope"}, "error"),
+                 tool("task", {"description": "Find the tests", "prompt": "long", "subagent_type": "explore"}),
+                 tool("read", {"filePath": "docs/a.md"}), tool("grep", {"pattern": "x"}), tool("glob", {"pattern": "*.md"}),
+                 tool("read", {"filePath": "b.md"}), tool("todowrite", {"todos": []})]
+        self.assertEqual(parse(0, "".join(calls) + step("Done."), "").trace.splitlines(), [
+            "Skill tiny", "failed: Skill nope", "Task Find the tests", "Read: a.md, b.md", "todowrite"])
+        self.assertEqual(parse(0, step("Done."), "").trace, "")                 # no tool calls: an empty trace, not none
+        odd = "".join(json.dumps({"type": "tool_use", "part": part}) + "\n" for part in (
+            {"tool": ["read"], "state": "x"}, {"tool": {"a": 1}}, {"tool": "write", "state": {"input": [1]}}))
+        self.assertEqual(parse(0, odd + step("Done."), "").trace.splitlines(), ["['read']", "{'a': 1}", "Write"])
+
     def test_O3_error_event(self):
         with self.assertRaisesRegex(ProviderError, r"exit 1\): scripted failure$"):
             parse(1, ERROR, "")
@@ -178,6 +201,8 @@ class OpenCodeTest(unittest.TestCase):
         self.assertEqual(json.loads(judge["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], JUDGE_RULES)
         self.assertEqual(json.loads(worker["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], WORKER_RULES)
         self.assertEqual((self.dir / "app.txt").read_text(), "done\n")
+        (trace,) = self.dir.glob(".subgoal/*/01/trace.md")                  # the judge can see what the worker did
+        self.assertEqual(trace.read_text(), parse(0, OK, "").trace + "\n")
 
     def test_O9_cli_surface(self):
         def cli(*argv):
