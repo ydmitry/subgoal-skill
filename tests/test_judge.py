@@ -1,7 +1,9 @@
-"""The judge as the finish line (--judge, no --check), and the unchecked run (neither), driven by two FakeProviders. No model calls.
+"""The judge as the finish line (--judge, alone or after a --check), and the unchecked run (neither), driven by two
+FakeProviders. No model calls.
 
     stop reason              tests
-    goal_met                 J1 (judge says met), J2 (not met, then met)
+    goal_met                 J1 (judge says met), J2 (not met, then met), J8 and J8b (a check, then the judge)
+    stuck                    J8d (the check failed the same way after a re-plan; the judge was never asked)
     out_of_iterations        J3 (no verdict is not met)
     out_of_time              J7 (no judge call once the worker used the time)
     out_of_tokens            J7 (no judge call once the worker used the tokens)
@@ -29,12 +31,12 @@ class JudgeLoopTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir)
         (self.dir / "app.py").write_text("todo\n")
 
-    def go(self, steps, verdicts, **kwargs):
+    def go(self, steps, verdicts, check=None, **kwargs):
         self.worker, self.judge = FakeProvider(steps), FakeProvider(verdicts)
         printed = io.StringIO()
         kwargs["plan"] = self.judge if kwargs.get("plan") else None   # the judge provider plans; J14 on
         with redirect_stdout(printed), redirect_stderr(io.StringIO()):
-            run = run_loop("make app.py say done", None, self.dir, self.worker, judge=self.judge, **kwargs)
+            run = run_loop("make app.py say done", check, self.dir, self.worker, judge=self.judge, **kwargs)
         self.printed = printed.getvalue()
         return run
 
@@ -164,10 +166,53 @@ class JudgeLoopTest(unittest.TestCase):
         self.ended(run, R.OUT_OF_TIME, 1, worker=2, judge=1)           # the judge gets the time that is left
         self.assertEqual(self.judge.timeouts, [300])
 
-    def test_J8_never_a_check_and_a_judge(self):
-        with self.assertRaises(ValueError):
-            run_loop("g", "true", self.dir, FakeProvider([]), judge=FakeProvider([]))
-        self.assertEqual(list(self.dir.iterdir()), [self.dir / "app.py"])
+    def test_J8_with_a_check_the_judge_is_asked_only_once_it_passes(self):
+        run = self.go([say("not yet"), edit("app.py", "done\n", text="Done.")], [judges(True, "app.py says done.")],
+                      check="grep -q done app.py")
+        self.ended(run, R.GOAL_MET, 0, worker=2, judge=1)              # step 1 failed the check: no judge call
+        self.assertFalse((run.folder / "01" / "judge-prompt.md").exists())
+        self.assertTrue((run.folder / "02" / "check.txt").exists())
+        self.assertIn("Done.", self.judge.prompts[0])
+        first, second = self.worker.prompts
+        for prompt in (first, second):
+            self.assertIn("After you stop, the loop runs this command in this folder: grep -q done app.py", prompt)
+            self.assertIn("Once it exits 0, a separate reviewer reads your result against the goal and decides", prompt)
+            self.assertNotIn("You may run commands in this folder yourself", prompt)     # the worker may run only the check
+            self.assertLess(prompt.index("exits 0"), prompt.index("a separate reviewer"))
+        self.assertIn("LAST CHECK (after step 0, exit code 1", first)
+        self.assertIn("LAST CHECK (after step 1, exit code 1", second)
+        for said in ("GOAL MET after step 2: the check exited 0 and a judge said met", "proves what the check tests",
+                     "a model's opinion", "check     grep -q done app.py      last run after step 2: exit 0",
+                     "judge     once the check exits 0: an agent with no edit tools decides      last verdict after step 2: met",
+                     "2 of 4 worker calls (judge calls: 1)", "(checks and judge calls included)", "judge via"):
+            self.assertIn(said, self.printed)
+
+    def test_J8b_a_judge_s_not_met_goes_to_the_next_step_and_a_newer_failed_check_replaces_it(self):
+        run = self.go([edit("app.py", "done\n"), edit("app.py", "broken\n"), edit("app.py", "done, well\n")],
+                      [judges(False, "app.py says done, but not well"), judges(True)], check="grep -q done app.py")
+        self.ended(run, R.GOAL_MET, 0, worker=3, judge=2)
+        second, third = self.worker.prompts[1:]
+        self.assertIn("LAST REVIEW (after step 1: a reviewer's opinion", second)
+        self.assertIn("app.py says done, but not well", second)
+        self.assertNotIn("LAST CHECK", second)
+        self.assertIn("LAST CHECK (after step 2, exit code 1", third)          # the newest result, not the older review
+        self.assertNotIn("but not well", third)
+
+    def test_J8c_with_a_judge_a_check_that_already_passes_guards_and_no_pass_is_a_repeated_failure(self):
+        run = self.go([say()] * 3, [judges(False, "not yet")] * 3, check="true", limits=Limits(max_iterations=3), plan=True)
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=3, judge=3)      # every call a verdict: no plan, no re-plan
+        self.assertEqual(run.replans, 0)
+        self.assertIn("LAST CHECK (after step 0, exit code 0", self.worker.prompts[0])
+        self.assertNotIn("the same failure", self.printed)
+        self.assertIn("last verdict after step 3: not met", self.printed)
+
+    def test_J8d_the_same_failed_check_twice_re_plans_and_the_judge_gives_no_verdict(self):
+        run = self.go([say()] * 3, [say("PARTS: app.py")], check="grep -q done app.py",
+                      limits=Limits(max_iterations=3), plan=True)
+        self.ended(run, R.STUCK, 1, worker=3, judge=1)                  # the judge's tool made the re-plan, nothing more
+        self.assertTrue(self.judge.prompts[0].startswith("You plan the work of a loop of workers"))
+        self.assertEqual((run.replans, run.judge_calls), (1, 0))
+        self.assertIn("no verdict yet", self.printed)
 
     def test_J9_prompts(self):
         self.go([say(), say()], [judges(False)] * 2, limits=Limits(max_iterations=2))

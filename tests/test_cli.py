@@ -15,6 +15,7 @@ from unittest import mock
 from subgoal.claude_code import ClaudeCode
 from subgoal.cli import main
 from subgoal.loop import Limits, StopReason
+from subgoal.opencode import OpenCode
 
 CORE = Path(__file__).resolve().parent.parent / "subgoal"
 
@@ -59,7 +60,8 @@ class CliTest(unittest.TestCase):
     def test_X2_argument_guards(self):
         ok, here = ["--goal", "g", "--check", "true"], ["--dir", str(self.dir)]
         for argv in (["--dir", "~", *ok], ["--dir", "/", *ok], [*here, "--check", "true"],
-                     [*here, *ok, "--goal-file", "f"], [*here, *ok, "--max-iterations", "0"], [*here, *ok, "--judge"]):
+                     [*here, *ok, "--goal-file", "f"], [*here, *ok, "--max-iterations", "0"],
+                     [*here, *ok, "--judge-provider", "nope"]):
             self.assertEqual(self.cli(*argv)[0], 2, argv)
         self.assertEqual(list(self.dir.iterdir()), [])
 
@@ -84,6 +86,33 @@ class CliTest(unittest.TestCase):
         self.assertIn(f"in the run folder {self.dir.resolve()}/.subgoal/<run-id>/ is the loop's own record", out)
         self.assertNotIn("pre-check: exit", out)
         self.assertEqual(list(self.dir.iterdir()), [])
+
+    def test_X10_a_check_then_a_judge(self):
+        code, out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--check", "true", "--judge", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("pre-check: exit 0\n", out)                     # with a judge, a passing check guards: no warning
+        self.assertNotIn("check_already_passes", out)
+        self.assertIn(f"provider: {ClaudeCode(allow=['Bash(true)']).describe()}\n", out)    # the worker may run only the check
+        self.assertIn("Once it exits 0, a separate reviewer reads your result", out)
+        self.assertIn(f"judge: {ClaudeCode(edit=False).describe()}\n", out)
+        self.assertIn("judge prompt, after each step whose check exits 0:\n", out)
+        self.assertEqual(list(self.dir.iterdir()), [])
+
+    def test_X11_the_judge_and_the_planner_may_run_on_another_tool(self):
+        def built(*argv):
+            with mock.patch("subgoal.cli.run_loop") as run_loop:
+                run_loop.return_value.stop_reason = StopReason.GOAL_MET
+                self.assertEqual(self.cli("--dir", str(self.dir), "--goal", "g", "--judge", *argv)[0], 0)
+            return run_loop.call_args.args[3], run_loop.call_args.kwargs["judge"], run_loop.call_args.kwargs["plan"]
+        worker, judge, plan = built("--provider", "opencode", "--model", "a/b", "--judge-provider", "claude-code")
+        self.assertEqual((type(worker), type(judge), plan), (OpenCode, ClaudeCode, judge))
+        self.assertEqual(worker.argv[worker.argv.index("--model") + 1], "a/b")
+        self.assertNotIn("--model", judge.argv)                         # one tool's model name means nothing to another
+        judge = built("--provider", "opencode", "--model", "a/b", "--judge-provider", "claude-code", "--judge-model", "j")[1]
+        self.assertEqual(judge.argv[judge.argv.index("--model") + 1], "j")
+        worker, judge, _ = built("--provider", "opencode", "--model", "a/b")
+        self.assertEqual((type(judge), judge.argv[judge.argv.index("--model") + 1]), (OpenCode, "a/b"))   # default: the worker's
+        self.assertIn("--judge-provider", self.cli("--help")[1])
 
     def test_X6_the_planner_is_on_unless_no_plan(self):
         for argv, planner in (([], True), (["--judge"], True), (["--no-plan"], False), (["--check", "true"], True),

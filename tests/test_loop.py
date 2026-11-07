@@ -281,6 +281,10 @@ class LoopTest(unittest.TestCase):
         a, b = loop.CheckResult(1, "FAILED x\n", 0.1, 1), loop.CheckResult(2, "FAILED x\n", 0.1, 2)
         self.assertFalse(loop.same_failure(a, b))
         self.assertTrue(loop.same_failure(a, loop.CheckResult(1, "FAILED x\n", 0.2, 2)))
+        passed = loop.CheckResult(0, "ok\n", 0.1, 1)
+        self.assertFalse(loop.same_failure(passed, loop.CheckResult(0, "ok\n", 0.1, 2)))    # two passes: no failure at all
+        timed_out = loop.CheckResult(None, "", 600, 1)
+        self.assertTrue(loop.same_failure(timed_out, loop.CheckResult(None, "", 600, 2)))  # a timeout is a failure
 
     def test_L27_the_re_plan_reads_the_workers_notes(self):
         self.replan([notes("tried app.py; the check wants the word done"), say(), say()], [say("P")],

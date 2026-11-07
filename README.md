@@ -29,7 +29,7 @@ On names: the repo is `subgoal-skill`; the program and the skill are both called
 ```mermaid
 flowchart LR
     G([goal]) --> W["worker: a fresh agent session edits the folder"]
-    W --> C{"check command (or --judge)"}
+    W --> C{"check command, --judge, or the check and then --judge"}
     C -- met --> M([goal met, exit 0])
     C -- not met --> B{budget left?}
     B -- yes --> W
@@ -94,13 +94,14 @@ Everything the run did is in that `records` folder: `run.json`, the worker's `no
 for each step the exact prompt, the reply, the check output or the judge's reply, and (with
 `claude-code`) `trace.md`, the worker's tool calls.
 
-## Who says "done": a check, nobody, or a judge
+## Who says "done": a check, nobody, a judge, or a check and then a judge
 
 - **`--check CMD`** is a shell command the loop runs after every step. Exit 0 means met.
   Tests make the best checks. Use a check whenever a command can tell. This is the only mode that loops
   on something a model cannot talk its way past. The loop also runs it once before step 1: a check that
   already passes then cannot tell done from not done, so the run ends at once as `check_already_passes`
-  (exit 2), and the dry run warns about it. Make it fail first, for example with the failing test.
+  (exit 2), and the dry run warns about it. Make it fail first, for example with the failing test. (With
+  `--judge` too, a check that already passes does not end the run: see below.)
 - **The re-plan.** When the check fails the same way after two steps in a row (the same exit code and the same
   last 2,000 characters of output, with timings such as `0.02s`, `12 ms` or `duration_ms: 1.1`, clock times such as
   `12:03:44,843`, dates and addresses such as `0x7f3a` taken out first), the workers are stuck, and another try from the same notes rarely helps. So before the
@@ -126,7 +127,7 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   in my tests a loop whose finish line was a model's opinion did not beat this. On five hard bug-fix tasks with
   Haiku, five runs each, a plan plus one call passed the hidden tests in 9 of 25 runs, one plain call in 3, and
   a loop with a Haiku judge in 2: the judge said "met" to most wrong fixes. A tiny sample, not a benchmark.
-- **`--judge`** (with no `--check`) loops on a judge instead: one more fresh agent session with no edit tools. It
+- **`--judge`** loops on a judge instead: one more fresh agent session with no edit tools. It
   reads the files against your goal, may run commands in the folder (your tests, a script,
   `node` or `python`) to check a part, and ends its reply with `VERDICT: met` or
   `VERDICT: not met` (anything else is not met). Its "met" is a model's opinion, and the report
@@ -137,9 +138,19 @@ for each step the exact prompt, the reply, the check output or the judge's reply
   evidence, and ends with the failing parts, which is the part of a long reply the next worker sees. When the goal
   names the document's reader, it also reads the page as that reader: a point the goal asks for that this reader cannot
   follow, for a missing why or how or a term not yet explained, fails.
-  In this mode the worker may run any command in the folder too.
-  Try it with `--judge` on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model.
+  With no check, the worker may run any command in the folder too.
+  Try it with `--judge` on [`examples/write-the-docs`](examples/write-the-docs); `--judge-model NAME` picks its model
+  and `--judge-provider` its tool (see Providers).
   It is useful for checking *how* the work was done (below), less for whether code is correct.
+- **`--check` and `--judge` together.** After every step the check runs first, and the judge is asked only once it
+  exits 0, so "met" needs both: the check for what a command can tell (the tests, a page's overflow and lint), the
+  judge for the rest. A failing check costs no judge call. The next step sees whichever came last: the failing
+  check's output, or, once the check passed, the judge's review. A check that already passes before step 1 does not
+  end the run, since the judge still tells done from not done; it guards against regressions instead. Two passing
+  checks in a row are no repeated failure, so they bring no re-plan. Everything else is as with `--check` alone:
+  the worker may run only the check (add `--allow` rules for more), and there is no plan before step 1, only the
+  re-plan when the check fails the same way twice. A command check stays the one finish line a model cannot talk
+  past: no verdict can carry a failing check.
 - **The plan.** With no `--check`, a read-only session of the judge model (`--judge-model`, else `--model`) first
   reads the folder and writes
   a plan to `plan.md` in the records: the parts the goal covers, suspected defects with file and line, the
@@ -236,6 +247,11 @@ the report at the end. The safety section applies unchanged.
 | `opencode` | `opencode run` (opencode 1.x), a new session per call | The worker may run any shell command in the folder. The judge has no edit tools, may run any shell command, and loads no plugins. `--allow` is refused. |
 | `opencode2` | `opencode run --standalone` (opencode 2), a new session and a private server per call | The worker's shell commands may not name an absolute path, `..` or `~`. The judge has no edit tools, may run shell commands under the same rule, and ignores the folder's own opencode config. `--allow` is refused. Token counts can miss the last step. |
 
+`--provider` sets the worker's tool, and `--judge-provider` the judge's and the planner's (default: the same), so
+an opencode worker can have a Claude Code judge. `--judge-model` defaults to `--model` only when the two tools are
+the same, since a model name belongs to one tool; otherwise the judge's tool uses its own default. An opencode worker
+reports no tool calls, so with it the judge cannot see how the work was done (see the skill bullet above).
+
 Works with a recent Claude Code (last tried with 2.1.310), opencode 1.x (1.19.3) and opencode 2 (2.1.4).
 For opencode 2 the provider uses `opencode2` if it is on your PATH (its installer adds one), else `opencode`,
 and refuses any binary that does not report version 2.
@@ -247,9 +263,9 @@ Every run ends with exactly one named stop reason and an exit code:
 
 | Stop reason | Meaning | Exit code |
 |---|---|---|
-| `goal_met` | The check exited 0, or the judge said met. | 0 |
+| `goal_met` | The check exited 0, or the judge said met; with both, the check exited 0 and then the judge said met. | 0 |
 | `unchecked` | No `--check` and no `--judge`: one planned step ran and nothing verified it. | 0 |
-| `check_already_passes` | The check exited 0 before any step, so it cannot tell done from not done. No step ran. | 2 |
+| `check_already_passes` | The check exited 0 before any step, so it cannot tell done from not done. No step ran. (Not with `--judge`, which then decides.) | 2 |
 | `out_of_iterations` | All N worker calls were made (default 4). | 1 |
 | `out_of_time` | The wall-clock limit was reached (default 30 minutes). | 1 |
 | `out_of_tokens` | The `--max-tokens` limit was reached. | 1 |

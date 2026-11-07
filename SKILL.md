@@ -1,6 +1,6 @@
 ---
 name: subgoal
-description: Use for a task in a folder that needs more than a few tool calls. With a check command that exits 0 (ideally a test suite) it runs Claude Code headless in a bounded loop of fresh sessions until the command passes. With no check it makes a plan and runs one step that nothing verifies, unless --judge asks a model for its opinion after each step.
+description: Use for a task in a folder that needs more than a few tool calls. With a check command that exits 0 (ideally a test suite) it runs Claude Code headless in a bounded loop of fresh sessions until the command passes. With no check it makes a plan and runs one step that nothing verifies, unless --judge asks a model for its opinion after each step. With both, the judge is asked once the check passes.
 ---
 
 # subgoal: a bounded loop toward a checkable goal
@@ -14,10 +14,10 @@ description: Use for a task in a folder that needs more than a few tool calls. W
 | A command can tell it is done (tests, a build, a script) | `--check CMD` | Up to 4 fresh worker sessions until CMD exits 0: the only finish line a model cannot talk past. The same failure twice in a row brings a read-only re-plan. |
 | A bug, or a feature a test can pin | Write the failing test first, then `--check` and `--protect` it | The same loop, now with a check. |
 | Nothing can check it (a page, a refactor, prose) | No flag; add `--no-plan` if the change is small and exact | A read-only plan (none with `--no-plan`), then one step; ends `unchecked`. Read the diff yourself. |
-| The goal names a skill or a way of working | `--judge` | Loops on a model's opinion, drawn from the files and the tool calls (`NN/trace.md`). Not for bugs: it accepted wrong fixes. |
+| The goal names a skill or a way of working, or has parts no command can tell | `--judge`, plus `--check` for the parts a command can tell | Loops on a model's opinion, drawn from the files and the tool calls (`NN/trace.md`); with a check, asked only once it exits 0, so met needs both. Not for bugs: it accepted wrong fixes. |
 
 - **Goal:** a few short lines of observable done criteria, plus any constraint ("without editing the tests").
-- **Check:** a command or script (`--check ./check.sh`; `&&` or `|` go in a script) that fails now and exits 0 only when the goal holds. One that already passes ends the run before any step (`check_already_passes`); the dry run says so. The worker may run only that exact command: `--allow 'Bash(pytest:*)'` (your test runner) lets it look for regressions.
+- **Check:** a command or script (`--check ./check.sh`; `&&` or `|` go in a script) that fails now and exits 0 only when the goal holds. One that already passes ends the run before any step (`check_already_passes`), unless `--judge` follows (then it guards); the dry run says so. The worker may run only that exact command: `--allow 'Bash(pytest:*)'` (your test runner) lets it look for regressions.
 - **Protect:** `--protect` the tests, the check script, any file the work must not change. If unclear, ask the user.
 
 ## 2. Launch: dry run first, then the real run in the background
@@ -30,7 +30,7 @@ description: Use for a task in a folder that needs more than a few tool calls. W
 
 Pass the project folder as an absolute `--dir`, never `$HOME` or `/`. Show the user the dry run's provider command(s) and
 first prompt, and get a yes. Then run it without `--dry-run`, as a background command. Options: `--max-iterations N` (4),
-`--max-minutes M` (30), `--max-tokens T`, `--model NAME`, `--judge-model NAME` (judge and planner), `--no-plan`; no `--check`: `--judge`.
+`--max-minutes M` (30), `--max-tokens T`, `--model NAME`, `--provider P`, `--judge-model NAME` and `--judge-provider P` (judge and planner; default: the worker's), `--no-plan`.
 
 ## 3. Read the result
 

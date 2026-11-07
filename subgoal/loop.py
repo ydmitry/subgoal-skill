@@ -1,5 +1,5 @@
-"""The loop: call the agent in fresh sessions until the finish line (a check command, or a judge) says met
-or a budget ends the run. Read this file first. Nothing in it knows which agent sits behind a provider."""
+"""The loop: call the agent in fresh sessions until the finish line (a check command, a judge, or the check and then
+the judge) says met or a budget ends the run. Read this file first. Nothing in it knows which agent sits behind a provider."""
 import hashlib
 import json
 import re
@@ -46,10 +46,10 @@ The goal counts as met only when that command exits 0. You cannot declare it met
 You may run the command yourself to see where things stand."""
 
 FINISH_JUDGE = """\
-After you stop, a separate reviewer reads your result against the goal and decides.
+{when}, a separate reviewer reads your result against the goal and decides.
 You cannot declare it met. The reviewer goes by the real files and the commands it runs, such
 as the tests, not by what you say, and assumes you may have overclaimed: make every part of the
-goal true and visible there. You may run commands in this folder yourself, such as the tests."""
+goal true and visible there."""
 
 FINISH_NONE = """\
 Nothing checks your work after you stop: this is the only step. Do not stop after one pass. Keep testing
@@ -138,7 +138,7 @@ class Run:
     cost_usd: float | None = None
     last_words: str | None = None    # the worker's last reply: recorded, never trusted
     last_check: CheckResult | None = None
-    judge: str | None = None         # judge.describe(); None when a check command is the finish line
+    judge: str | None = None         # judge.describe(); None: no judge (with a check, it is asked once the check passes)
     judge_calls: int = 0
     last_verdict: Verdict | None = None
     replans: int = 0                 # plans made after the check failed the same way twice
@@ -159,12 +159,13 @@ def build_prompt(goal, check, protect, notes_path, notes, last, skills=(), plan=
         keep = f"\nDo not edit these paths (the run stops if they change): {', '.join(protect)}\n" if protect else ""
         return f"{goal.strip()}\n\n{plan}{FINISH_NONE}\n{keep}"
     new = last is None or last.step == 0
-    if check is None:
-        finish = FINISH_JUDGE                           # with no check, only a judged run gets here
+    review = FINISH_JUDGE.format(when="After you stop" if check is None else "Once it exits 0")   # the judge comes second
+    finish = review + " You may run commands in this folder yourself, such as the tests." if check is None else \
+        FINISH_CHECK.format(check=check) + ("\n" + review) * judged       # with a check, the worker may run only it
+    if last is None or isinstance(last, Verdict):       # a review: the run has no check, or the check passed
         seen = "LAST REVIEW (none yet: this is the first step)" if new else "LAST REVIEW " \
             f"(after step {last.step}: a reviewer's opinion, not a command result; at most its last {CAP:,} characters)\n{last.reasons}"
     else:
-        finish = FINISH_CHECK.format(check=check)
         seen = f"LAST CHECK (after step {last.step}, exit code {last}, last 4,000 characters of output)\n" \
                f"{last.output.strip() or '(no output)'}"
     if skills:                                  # a fresh session knows no skill unless it is told
@@ -185,11 +186,9 @@ def safe_workdir(path):
 
 def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=(),
              clock=time.monotonic, judge: Provider | None = None, plan: Provider | None = None):
-    """Run the loop to its end and return the Run (progress to stderr, the report to stdout). The finish line is
-    `check`, a command, or `judge`, a provider built with edit=False; with neither, one step runs, unchecked.
-    `plan`, such a provider too, plans before step 1, or, with a check, only re-plans after the same failure twice."""
-    if check is not None and judge is not None:
-        raise ValueError("a run takes a check command or a judge, not both")
+    """Run the loop to its end and return the Run (progress to stderr, the report to stdout). The finish line is a
+    `check` command, a `judge` (a provider built with edit=False), or the check and then the judge; with neither, one step
+    runs, unchecked. `plan`, such a provider too, plans before step 1, or with a check re-plans after the same failure twice."""
     workdir = safe_workdir(workdir)
     folder = workdir / ".subgoal" / time.strftime("%Y%m%d-%H%M%S", time.gmtime())   # run id: UTC start
     while folder.exists():                                          # a second run in the same second
@@ -219,8 +218,8 @@ def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=
 def _steps(run, provider, judge, guarded, time_left, planner=None):
     if run.check is not None:                                       # step 0: the pre-check
         run.last_check = _check(run, 0)
-        if run.last_check.exit_code == 0:
-            return StopReason.CHECK_ALREADY_PASSES                  # no step could show in it
+        if run.last_check.exit_code == 0 and judge is None:         # with a judge, a passing check guards
+            return StopReason.CHECK_ALREADY_PASSES                  # alone, no step could show in it
     traces, planned = {}, 0                 # step: its trace.md, as the loop wrote it; the step a re-plan was made for
     plan = _plan(run, planner, time_left, run.folder, FIRST_PLAN) if planner and run.check is None else ""  # a check: re-plans only
     for i in range(1, run.limits.max_iterations + 1):
@@ -231,7 +230,7 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
         skills = sorted({s[6:].strip() for t in traces.values() for s in t.splitlines() if s.startswith("Skill ")})
         prompt = build_prompt(run.goal, run.check, run.protect, notes.relative_to(run.dir),
                               notes.read_text() if notes.exists() else "",
-                              run.last_check or run.last_verdict, skills, plan, judge is not None)
+                              newest(run), skills, plan, judge is not None)
         (step / "prompt.md").write_text(prompt)                     # b: built from files only
         run.steps, began = i, time.monotonic()
         try:
@@ -256,13 +255,14 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
             return StopReason.PROTECTED_FILE_CHANGED
         if judge is None and run.check is None:
             return StopReason.UNCHECKED                             # nothing decides: one step, then it ends
-        if judge is None:
-            prev, run.last_check = run.last_check, _check(run, i)   # f: the loop checks, not the agent
+        met, said, stuck = True, "", False                          # f: the loop decides, not the agent
+        if run.check is not None:                                   # first the check, which no model can talk past
+            prev, run.last_check = run.last_check, _check(run, i)
             met = run.last_check.exit_code == 0
             said = f"check exit {run.last_check} ({'met' if met else 'not met'})"
             stuck, run.same_since = (same := same_failure(prev, run.last_check)) and prev.step > 0, run.same_since if same else i
-        else:
-            if stop := _budget(run, time_left):                     # f: no judge call past a limit
+        if judge is not None and met:                               # then the judge, only once the check holds
+            if stop := _budget(run, time_left):                     # no judge call past a limit
                 return stop
             try:
                 run.last_verdict = _judge(run, judge, step, time_left)
@@ -271,7 +271,7 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
                 return StopReason.OUT_OF_TIME if time_left() <= 0 else StopReason.PROVIDER_FAILED
             if _moved(run, guarded, "judge"):                       # a command it ran moved it
                 return StopReason.PROTECTED_FILE_CHANGED            # before its verdict counts
-            met, said, stuck = run.last_verdict.met, f"judge: {run.last_verdict}", False
+            met, said = run.last_verdict.met, ", ".join(filter(None, (said, f"judge: {run.last_verdict}")))
         print(f"step {i}/{run.limits.max_iterations}  worker {mmss(worker_s)}  "
               f"{count(reply.tokens)} tokens  {said}", file=sys.stderr)
         save(run)
@@ -290,8 +290,12 @@ def _steps(run, provider, judge, guarded, time_left, planner=None):
     return StopReason.OUT_OF_ITERATIONS
 
 
-def same_failure(a, b):   # NOISE aside; only the end, as a timing that changes width moves where the tail starts
-    return a.exit_code == b.exit_code and NOISE.sub("", a.output)[-TAIL_CAP // 2:] == NOISE.sub("", b.output)[-TAIL_CAP // 2:]
+def newest(run):   # what the finish line said last; on one step the verdict, as the judge comes after the check
+    return max(filter(None, (run.last_verdict, run.last_check)), key=lambda r: r.step, default=None)
+
+
+def same_failure(a, b):   # NOISE aside; only the end, as a timing that changes width moves where the tail starts; a pass is none
+    return a.exit_code == b.exit_code != 0 and NOISE.sub("", a.output)[-TAIL_CAP // 2:] == NOISE.sub("", b.output)[-TAIL_CAP // 2:]
 
 
 def _moved(run, guarded, who):
@@ -391,11 +395,11 @@ def mmss(seconds):
 
 def report(run):
     """The final report, printed and saved as report.md. Only the finish line can make it say GOAL MET."""
-    last, limits, judged = run.last_check or run.last_verdict, run.limits, run.judge is not None
+    last, limits, judged, checked = newest(run), run.limits, run.judge is not None, run.check is not None
     if run.stop_reason is StopReason.GOAL_MET:
-        said = "a judge said met" if judged else "the check exited 0"
-        caveat = ("That is a model's opinion, not a check command's exit code." if judged else
-                  "This proves what the check tests and nothing more.")
+        said = " and ".join(["the check exited 0"] * checked + ["a judge said met"] * judged)
+        caveat = " ".join(["This proves what the check tests and nothing more."] * checked +
+                          ["The judge's met is a model's opinion, not a command's exit code."] * judged)
         lines = [f"subgoal: GOAL MET after step {last.step}: {said}", f"  {caveat} Read the diff."]
     elif run.stop_reason is StopReason.CHECK_ALREADY_PASSES:
         lines = ["subgoal: CHECK ALREADY PASSES before any step, so it cannot tell done from not done.",
@@ -405,35 +409,34 @@ def report(run):
     else:
         lines = [f"subgoal: GOAL NOT MET ({run.stop_reason.value})"]
     limit = f"limit {limits.max_tokens:,}" if limits.max_tokens else "no limit set"
-    tokens = f"{count(run.tokens)} ({limit}; as reported by the provider)"
-    if run.tokens is None and limits.max_tokens:
-        tokens = "unknown: token limit NOT enforced (provider reported no tokens)"
+    tokens = "unknown: token limit NOT enforced (provider reported no tokens)" if run.tokens is None and limits.max_tokens \
+        else f"{count(run.tokens)} ({limit}; as reported by the provider)"
     cost = "unknown" if run.cost_usd is None else \
         f"${run.cost_usd:.2f} (the provider's own estimate; a subscription is not billed per call)"
     if run.steps == 0 and run.tokens is None and run.cost_usd is None:      # a plan's numbers still show
         tokens = cost = "none (no worker calls)"
-    if judged:
-        ran = f"last verdict after step {last.step}: {last}" if last else "no verdict yet"
-        finish = f"judge     no check command: an agent with no edit tools decides      {ran}"
-    else:
+    gates, c, v = [], run.last_check, run.last_verdict                      # one line per finish line, in its order
+    if checked or not judged:
         same = f", the same failure since {f'step {run.same_since}' if run.same_since else 'the pre-check'}"   # no step moved it
-        ran = f"last run after step {last.step}: exit {last}{same * (last.step > run.same_since)}" if last else "not run"
-        finish = f"check     {run.check or 'none, and no judge'}      {ran}"
-    calls = f" (judge calls: {run.judge_calls})" if judged else f" (re-plans: {run.replans})" if run.replans else ""
+        gates.append(f"check     {run.check or 'none, and no judge'}      " +
+                     (f"last run after step {c.step}: exit {c}{same * (c.step > run.same_since)}" if c else "not run"))
+    if judged:
+        gates.append(f"judge     {'once the check exits 0' if checked else 'no check command'}: an agent with no edit tools decides"
+                     f"      {f'last verdict after step {v.step}: {v}' if v else 'no verdict yet'}")
+    calls = f" (judge calls: {run.judge_calls})" * judged + f" (re-plans: {run.replans})" * bool(run.replans)
     lines += [f"  goal      {' '.join(run.goal.split())}",
-              f"  {finish}",
+              *[f"  {gate}" for gate in gates],
               f"  steps     {run.steps} of {limits.max_iterations} worker calls{calls}",
               f"  time      {mmss(run.seconds)} of {mmss(limits.max_seconds)} "
-              f"({'judge calls' if judged else 'checks' if run.check else 'all calls'} included)",
+              f"({' and '.join(['checks'] * checked + ['judge calls'] * judged) or 'all calls'} included)",
               f"  tokens    {tokens}",
               f"  cost      {cost}",
-              f"  provider  {run.provider}"]
-    lines += [f"  judge via {run.judge}"] if judged else []
-    lines += [f"  error     {run.error}"] if run.error else []
+              f"  provider  {run.provider}",
+              *[f"  judge via {run.judge}"] * judged, *[f"  error     {run.error}"] * bool(run.error)]
     words = f"{w[:150]} [...] {w[-150:]}" if len(w := " ".join((run.last_words or "").split())) > 300 else w   # the end: what it left
     lines += [f"  worker's last words (unverified): \"{words}\""] if run.last_words is not None else []
-    detail = last and (last.reasons if judged else last.output).strip()
+    detail = last and (last.reasons if isinstance(last, Verdict) else last.output).strip()
     if detail:
-        lines.append("  judge's reasons (a model's opinion; last lines):" if judged else "  check output (tail):")
+        lines.append("  judge's reasons (a model's opinion; last lines):" if isinstance(last, Verdict) else "  check output (tail):")
         lines += [f"    {line}".rstrip() for line in detail.splitlines()[-6:]]
     return "\n".join(lines + [f"  records   {run.folder}/"])
