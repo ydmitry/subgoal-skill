@@ -211,7 +211,13 @@ Which to use (my evaluations behind each choice are in the bullets below):
   times a Haiku token here. With no `--judge-model` the judge is the worker's model: a Haiku judge, tried early on 7
   pages with an older version and no check, made 2 of them correct. These three arms ran later than the Opus ones,
   with the same tasks and graders, on a later subgoal version that changed the judge-alone worker's prompt and the
-  trace's file paths.
+  trace's file paths. A recheck by another model kept the gap in errors and narrowed the one in correct pages. A
+  Sonnet session, not told which arm a page came from, ran the first of the graders' two fact-check passes on the
+  pages of the checks with the Opus judge and of the checks alone. It found about a quarter as many wrong or
+  unsupported claims on the judged pages (0.26 against 0.95 a page; the Opus first pass found 0.32 against 1.55),
+  and by its count 18 of 19 pages were correct against 16 of 20 (the page from the run that loaded my setup left
+  out). But its pass misses real errors: on the checks-alone pages it found 4 of 10 errors that it confirmed as real
+  when pointed at them, and counting the other 6 brings that arm to 13 of 20.
 - **The plan.** With no `--check`, a read-only session of the judge model (`--judge-model`, else `--model`) first
   reads the folder and writes
   a plan to `plan.md` in the records: the parts the goal covers, suspected defects with file and line, the
