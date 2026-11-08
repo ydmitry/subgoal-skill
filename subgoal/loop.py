@@ -50,6 +50,7 @@ FINISH_JUDGE = """\
 You cannot declare it met. The reviewer goes by the real files and the commands it runs, such
 as the tests, not by what you say, and assumes you may have overclaimed: make every part of the
 goal true and visible there."""
+FIX_CAUSE = "\nFix the cause of what the reviewer names: never reword a true sentence, cut evidence or change a true number to clear it."
 
 FINISH_NONE = """\
 Nothing checks your work after you stop: this is the only step. Do not stop after one pass. Keep testing
@@ -160,8 +161,7 @@ def build_prompt(goal, check, protect, notes_path, notes, last, skills=(), plan=
         return f"{goal.strip()}\n\n{plan}{FINISH_NONE}\n{keep}"
     new = last is None or last.step == 0
     review = FINISH_JUDGE.format(when="After you stop" if check is None else "Once it exits 0")   # the judge comes second
-    finish = review + " You may run commands in this folder yourself, such as the tests." if check is None else \
-        FINISH_CHECK.format(check=check) + ("\n" + review) * judged       # with a check, the worker may run only it
+    finish = review + FIX_CAUSE if check is None else FINISH_CHECK.format(check=check) + ("\n" + review) * judged
     if last is None or isinstance(last, Verdict):       # a review: the run has no check, or the check passed
         seen = "LAST REVIEW (none yet: this is the first step)" if new else "LAST REVIEW " \
             f"(after step {last.step}: a reviewer's opinion, not a command result; at most its last {CAP:,} characters)\n{last.reasons}"

@@ -219,7 +219,8 @@ class JudgeLoopTest(unittest.TestCase):
         for prompt in self.worker.prompts:
             self.assertIn("a separate reviewer reads your result against the goal and decides", prompt)
             self.assertIn("You cannot declare it met", prompt)
-            self.assertIn("You may run commands in this folder yourself", prompt)   # Bash is allowed
+            self.assertNotIn("You may run commands in this folder yourself", prompt)    # as with a check, where it did better
+            self.assertIn("Fix the cause of what the reviewer names: never reword a true sentence", prompt)
             self.assertNotIn("exits 0", prompt)
             self.assertLess(prompt.index("FINISH LINE"), prompt.index("RULES"))
             self.assertLess(prompt.index("NOTES FROM EARLIER STEPS"), prompt.index("LAST REVIEW"))
