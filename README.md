@@ -102,8 +102,17 @@ Which to use (my evaluations behind each choice are in the bullets below):
   `--allow 'Bash(pytest:*)'`.
 - **Code with no test to aim at:** no flag (a plan and one step); then run the tests and read the diff yourself. A
   test that a session writes for you needs your reading and approval before a `--check` relies on it.
-- **A page or a document:** `--judge`, with a `--check` first for what a command can tell (for a page, a check
-  script the skill that makes it gives, such as the illustrate skill's `gates.py`; with none, `--judge` alone).
+- **A page or a document:** `--judge` with an Opus judge, and a `--check` first for what a command can tell (for a
+  page made with the illustrate skill, its `gates.py`). In my tests on HTML pages with a Haiku worker, the command
+  below made 18 of 20 pages correct (no serious error, at most one small one), against 11 with the check alone and
+  7 with the check and a Sonnet judge or with no flag, in separate rounds; the Opus judge was $1.17 of its $1.48 a
+  page. With no such script, `--judge` alone with the Opus judge made 17 of 20 at $1.70. Documents other than pages
+  were not measured. `ILLUSTRATE` is the illustrate skill's folder, and `--allow Bash` lets the worker run any
+  command, as in the tests:
+  ```
+  python3 -m subgoal --dir DIR --goal-file GOAL.md --model claude-haiku-5-5 --judge --judge-model claude-opus-5-5 \
+    --check "python3 ILLUSTRATE/scripts/gates.py page.html" --allow Bash --max-iterations 2 --no-plan
+  ```
 - **Parts no command can tell, or how the work was done** (a goal that names a skill): `--judge`.
 
 - **`--check CMD`** is a shell command the loop runs after every step. Exit 0 means met.
@@ -193,6 +202,16 @@ Which to use (my evaluations behind each choice are in the bullets below):
   page; on the code tasks above it left the count unchanged (17 of 26 runs either way, one task better and one
   worse). So for a document or a page, use `--judge`, with a `--check` first for what a command can tell: with it
   the pages still held fewer wrong or unsupported claims (11 against 19) and cost less ($1.48 against $1.70).
+  The judge's model matters as much as having one, and every judge in these page tests was Opus. On the same 10
+  tasks, again twice each with a Haiku worker, 7 of 20 pages were correct with no flag ($0.81 a page), 11 of 20 with
+  the page checks alone ($0.23), and 7 of 20 with the checks and then a Sonnet judge ($0.48), which said "met" to 12
+  of its 13 wrong pages. Against the checks and the Opus judge (18 of 20), each of the three was behind by 7 or more
+  pages, worse on at least 5 tasks and better on none. The Opus judge is most of the price: $1.17 of the $1.48 a
+  page, for 0.88 million of the run's 3.8 million tokens (cache reads included), since an Opus token cost about 12
+  times a Haiku token here. With no `--judge-model` the judge is the worker's model: a Haiku judge, tried early on 7
+  pages with an older version and no check, made 2 of them correct. These three arms ran later than the Opus ones,
+  with the same tasks and graders, on a later subgoal version that changed the judge-alone worker's prompt and the
+  trace's file paths.
 - **The plan.** With no `--check`, a read-only session of the judge model (`--judge-model`, else `--model`) first
   reads the folder and writes
   a plan to `plan.md` in the records: the parts the goal covers, suspected defects with file and line, the
