@@ -96,6 +96,16 @@ the worker's tool calls.
 
 ## Who says "done": a check, nobody, a judge, or a check and then a judge
 
+Which to use (my evaluations behind each choice are in the bullets below):
+- **A command can tell** (tests, a build, a script): `--check CMD`. With the default provider the worker may then run
+  only that command and simple file commands, plus the Claude Code permission rules you add with `--allow`, such as
+  `--allow 'Bash(pytest:*)'`.
+- **Code with no test to aim at:** no flag (a plan and one step); then run the tests and read the diff yourself. A
+  test that a session writes for you needs your reading and approval before a `--check` relies on it.
+- **A page or a document:** `--judge`, with a `--check` first for what a command can tell (for a page, a check
+  script the skill that makes it gives, such as the illustrate skill's `gates.py`; with none, `--judge` alone).
+- **Parts no command can tell, or how the work was done** (a goal that names a skill): `--judge`.
+
 - **`--check CMD`** is a shell command the loop runs after every step. Exit 0 means met.
   Tests make the best checks. Use a check whenever a command can tell. This is the only mode that loops
   on something a model cannot talk its way past. The loop also runs it once before step 1: a check that
@@ -127,6 +137,19 @@ the worker's tool calls.
   in my tests a loop whose finish line was a model's opinion did not beat this. On five hard bug-fix tasks with
   Haiku, five runs each, a plan plus one call passed the hidden tests in 9 of 25 runs, one plain call in 3, and
   a loop with a Haiku judge in 2: the judge said "met" to most wrong fixes. A tiny sample, not a benchmark.
+  A later, larger test found no loop that beat it either. On 13 real bug fixes from open-source Python projects
+  (click, urllib3, werkzeug and others), each given only a short issue and no test, each run twice, Haiku passed
+  the tests the real fix added (hidden from every session) and the project's other tests in 19 of 26 runs with
+  this default, 17 with an Opus judge loop (`--max-iterations 2`, no plan), 17 when a separate session first wrote a
+  failing test from the issue and the loop ran `--check` on it, and 16 with that check and then the Opus judge, or
+  with an Opus session writing the test. A Sonnet worker passed 20 with the default and 18 with the judge. Each
+  loop came within 3 runs of the default with the same worker, under the gap of 4 set before the runs as the bar
+  for a difference. With Haiku, the judge loop cost about four times as much ($0.17 against $0.04 a run). In the
+  26 runs with the check alone, every written test failed before the fix and passed after it, yet 9 of those runs
+  failed the hidden tests (4 of them on two tasks that no run of any kind passed): a test written from a short
+  issue has the issue's gaps, and a loop aimed at it stops once it passes. So for code with no tests, use the
+  default and read the diff; if a session writes the test, read it against the issue and approve it before a
+  `--check` relies on it.
 - **`--judge`** loops on a judge instead: one more fresh agent session with no edit tools. It
   reads the files against your goal, may run commands in the folder (your tests, a script,
   `node` or `python`) to check a part, and ends its reply with `VERDICT: met` or
@@ -151,17 +174,25 @@ the worker's tool calls.
   the worker may run only the check (add `--allow` rules for more), and there is no plan before step 1, only the
   re-plan when the check fails the same way twice. A command check stays the one finish line a model cannot talk
   past: no verdict can carry a failing check.
-  In my tests it beat the judge alone. On 10 tasks where Haiku explains real material (code, a pull request, a
+  In my tests it beat the judge alone, before the change below. On 10 tasks where Haiku explains real material (code, a pull request, a
   dataset, an incident) to a named reader as one HTML page, with the illustrate skill's page checks as the check
   (`python3 .illustrate/scripts/gates.py page.html`), `--allow Bash` so the worker could run any command as it can
-  with the judge alone, and in both arms an Opus judge (2 reviews at most, no plan), each run twice: 18 of 20 pages
+  with the judge alone, and in both arms an Opus judge (`--max-iterations 2`, no plan), each run twice: 18 of 20 pages
   were factually correct (no serious error, at most one small one), against 12 of 20 with the judge alone (one-sided
-  Fisher p = 0.03), and the pages held 11 wrong or unsupported claims in all, against 25. Pages that were also
-  complete and easy to follow went from 5 to 9 of 20, too few to be sure. A run cost about the same, $1.48 a page
+  Fisher p = 0.03), and the pages held 11 wrong or unsupported claims in all, against 25. (One page in each arm
+  came from a run that loaded my own Claude Code setup by mistake; without those two, 18 of 19 against 11 of 19.)
+  Pages that were also complete and easy to follow went from 5 to 9 of 20, too few to be sure. A run cost about the same, $1.48 a page
   against $1.61. The page checks passed after every step, so they never held a review back. The judge's prompt and
   the worker's tools were the same in both arms; only the worker's prompt differed: it named the check as the
   finish line and, before step 1, showed the check's failing output, which ends with a rule against hiding a problem
   instead of fixing its cause. Separate Opus and Sonnet sessions graded the pages. A small sample, not a benchmark.
+  The judge alone now tells its worker the same in its own words ("Fix the cause of what the reviewer names: never
+  reword a true sentence, cut evidence or change a true number to clear it."), in place of a line saying it may
+  run commands, such as the tests. Run twice more on the same tasks, the judge alone then made 17 of 20 pages
+  correct (one-sided Fisher p = 0.08 against 12, so not proven), with 19 wrong or unsupported claims, at $1.70 a
+  page; on the code tasks above it left the count unchanged (17 of 26 runs either way, one task better and one
+  worse). So for a document or a page, use `--judge`, with a `--check` first for what a command can tell: with it
+  the pages still held fewer wrong or unsupported claims (11 against 19) and cost less ($1.48 against $1.70).
 - **The plan.** With no `--check`, a read-only session of the judge model (`--judge-model`, else `--model`) first
   reads the folder and writes
   a plan to `plan.md` in the records: the parts the goal covers, suspected defects with file and line, the
