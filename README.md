@@ -151,6 +151,17 @@ the worker's tool calls.
   the worker may run only the check (add `--allow` rules for more), and there is no plan before step 1, only the
   re-plan when the check fails the same way twice. A command check stays the one finish line a model cannot talk
   past: no verdict can carry a failing check.
+  In my tests it beat the judge alone. On 10 tasks where Haiku explains real material (code, a pull request, a
+  dataset, an incident) to a named reader as one HTML page, with the illustrate skill's page checks as the check
+  (`python3 .illustrate/scripts/gates.py page.html`), `--allow Bash` so the worker could run any command as it can
+  with the judge alone, and in both arms an Opus judge (2 reviews at most, no plan), each run twice: 18 of 20 pages
+  were factually correct (no serious error, at most one small one), against 12 of 20 with the judge alone (one-sided
+  Fisher p = 0.03), and the pages held 11 wrong or unsupported claims in all, against 25. Pages that were also
+  complete and easy to follow went from 5 to 9 of 20, too few to be sure. A run cost about the same, $1.48 a page
+  against $1.61. The page checks passed after every step, so they never held a review back. The judge's prompt and
+  the worker's tools were the same in both arms; only the worker's prompt differed: it named the check as the
+  finish line and, before step 1, showed the check's failing output, which ends with a rule against hiding a problem
+  instead of fixing its cause. Separate Opus and Sonnet sessions graded the pages. A small sample, not a benchmark.
 - **The plan.** With no `--check`, a read-only session of the judge model (`--judge-model`, else `--model`) first
   reads the folder and writes
   a plan to `plan.md` in the records: the parts the goal covers, suspected defects with file and line, the
