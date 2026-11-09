@@ -170,8 +170,10 @@ Which to use (my evaluations behind each choice are in the bullets below):
   plan before a check too (subgoal itself does not). An Opus plan raised the Opus judge loop from 17 to 21 and the
   check with the judge from 16 to 20 (4 each, at the bar, against the earlier round's runs); a Haiku plan raised the
   check alone from 17 to 18. None beat the default's 19 by the gap of 4. The default with an Opus plan
-  (`--judge-model claude-opus-5-5` and no `--judge`: the planner runs on the judge model) passed 22, one short of
-  that gap, so not proven, at $0.23 a run against $0.04; neither loop added a pass on top of an Opus plan. So for
+  (`--judge-model claude-opus-5-5` and no `--judge`: the planner runs on the judge model) passed 22, and 22 again
+  against the default's 19 in two more runs per task: over the four runs per task, 44 against 38 of 52, ahead on the
+  same three tasks and behind on none, but under the gap of 8 set in advance for 52 runs, so not shown to help, at
+  $0.22 a run against $0.05. Neither loop added a pass on top of an Opus plan. So for
   code with no tests, use the default and read the diff; if a session writes the test, read it against the issue
   and approve it before a `--check` relies on it.
 - **`--judge`** loops on a judge instead: one more fresh agent session with no edit tools. It
