@@ -113,7 +113,9 @@ Which to use (my evaluations behind each choice are in the bullets below):
   python3 -m subgoal --dir DIR --goal-file GOAL.md --model claude-haiku-5-5 --judge --judge-model claude-opus-5-5 \
     --check "python3 ILLUSTRATE/scripts/gates.py page.html" --allow Bash --max-iterations 2 --no-plan
   ```
-- **Parts no command can tell, or how the work was done** (a goal that names a skill): `--judge`.
+- **Parts no command can tell, or how the work was done** (a goal that names a skill): `--judge`, with
+  `--judge-model claude-opus-5-5`: without one the judge is the worker's model, and on pages, after the page checks,
+  a Sonnet judge made 7 of 20 correct against the Opus judge's 18 (see the `--judge` bullets below).
 
 - **`--check CMD`** is a shell command the loop runs after every step. Exit 0 means met.
   Tests make the best checks. Use a check whenever a command can tell. This is the only mode that loops
@@ -139,13 +141,18 @@ Which to use (my evaluations behind each choice are in the bullets below):
   pre-check` (or `since step 2`). Since the pre-check, it means no step changed what the check tests: the check
   or the environment is the problem, not the goal (a test file that cannot even be collected, say), and
   `notes.md` says what the worker verified instead. The report quotes the start and the end of the worker's
-  last words, where what it did not do or could not verify usually is.
+  last words, where what it did not do or could not verify usually is. In my tests the re-plan has fired only on
+  a check built to stay red (a test file that cannot be collected): its plans named the blocker, and no outcome
+  could change there. It is untested on a fixable task that gets stuck. On 43 fixable runs it never fired, as each
+  passed at step 1, and with `--max-iterations 2` it cannot fire.
 - **No `--check`** (the default) runs a read-only plan and **one** worker step, then ends as
   `unchecked` (exit 0): nothing verified the result, so run the tests and read the diff yourself. The worker is
   told that nothing checks it and to keep testing its own change until it finds no more problems. Why no loop:
   in my tests a loop whose finish line was a model's opinion did not beat this. On five hard bug-fix tasks with
   Haiku, five runs each, a plan plus one call passed the hidden tests in 9 of 25 runs, one plain call in 3, and
-  a loop with a Haiku judge in 2: the judge said "met" to most wrong fixes. A tiny sample, not a benchmark.
+  a loop with a Haiku judge in 2: the judge said "met" to every wrong fix (23 of 23). A tiny sample, not a
+  benchmark, and an early one: its workers loaded my own CLAUDE.md (then only a few commit rules) and my Claude
+  account's connectors, which my later tests keep out.
   A later, larger test found no loop that beat it either. On 13 real bug fixes from open-source Python projects
   (click, urllib3, werkzeug and others), each given only a short issue and no test, each run twice, Haiku passed
   the tests the real fix added (hidden from every session) and the project's other tests in 19 of 26 runs with
@@ -156,9 +163,17 @@ Which to use (my evaluations behind each choice are in the bullets below):
   for a difference. With Haiku, the judge loop cost about four times as much ($0.17 against $0.04 a run). In the
   26 runs with the check alone, every written test failed before the fix and passed after it, yet 9 of those runs
   failed the hidden tests (4 of them on two tasks that no run of any kind passed): a test written from a short
-  issue has the issue's gaps, and a loop aimed at it stops once it passes. So for code with no tests, use the
-  default and read the diff; if a session writes the test, read it against the issue and approve it before a
-  `--check` relies on it.
+  issue has the issue's gaps, and a loop aimed at it stops once it passes. With the Opus judge asked after that
+  check, 10 runs passed their written test and failed the hidden tests, and the judge said "met" on 9 of them.
+  Those loops had no plan, while the default plans first, so I ran them again with the default's read-only planner
+  step before step 1, twice per task, the check arms with the same written tests and on a copy of subgoal changed to
+  plan before a check too (subgoal itself does not). An Opus plan raised the Opus judge loop from 17 to 21 and the
+  check with the judge from 16 to 20 (4 each, at the bar, against the earlier round's runs); a Haiku plan raised the
+  check alone from 17 to 18. None beat the default's 19 by the gap of 4. The default with an Opus plan
+  (`--judge-model claude-opus-5-5` and no `--judge`: the planner runs on the judge model) passed 22, one short of
+  that gap, so not proven, at $0.23 a run against $0.04; neither loop added a pass on top of an Opus plan. So for
+  code with no tests, use the default and read the diff; if a session writes the test, read it against the issue
+  and approve it before a `--check` relies on it.
 - **`--judge`** loops on a judge instead: one more fresh agent session with no edit tools. It
   reads the files against your goal, may run commands in the folder (your tests, a script,
   `node` or `python`) to check a part, and ends its reply with `VERDICT: met` or
@@ -267,7 +282,9 @@ planner and the judge have no edit tools and may run shell commands in the folde
   commands too. They run as you,
   unsandboxed, in the folder, so in effect they can run any code you can. Work on a clean git
   tree or a branch you can reset.
-  Hooks and MCP servers in that folder run too.
+  Hooks and MCP servers in that folder run too. Each session is your own Claude Code, so it also loads your
+  CLAUDE.md, skills and plugins; my evaluations run Claude Code with `--safe-mode`, so their results do not rest
+  on my setup.
 - **Never add `--dangerously-skip-permissions`** outside an isolated container with no
   internet access. The project itself never passes it.
 - **Every step spends your Claude subscription usage or API budget.** The limits bound the
