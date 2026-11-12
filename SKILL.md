@@ -31,12 +31,12 @@ description: Use for a task in a folder that needs more than a few tool calls an
 
 Pass the project folder as an absolute `--dir`, never `$HOME` or `/`. Show the user the dry run's provider command(s) and
 first prompt, and get a yes. Then run it without `--dry-run`, as a background command. Options: `--max-iterations N` (4),
-`--max-minutes M` (30), `--max-tokens T`, `--model NAME`, `--provider P` (`opencode` or `opencode2`: that tool and its models do the work), `--judge-model NAME` and `--judge-provider P` (judge and planner; default: the worker's), `--no-plan`, `--same-session` (later steps continue the worker's own chat with what the check or the judge said, not a fresh session).
+`--max-minutes M` (30), `--max-tokens T`, `--model NAME`, `--provider P` (`opencode` or `opencode2`: that tool and its models do the work), `--judge-model NAME` and `--judge-provider P` (judge and planner; default: the worker's), `--no-plan`, `--same-session` (on demand: later steps continue the worker's own chat with what the check or the judge said; in the maintainer's page evaluations a fresh session did as well and cost less, so it is off by default).
 
 ## 3. Read the result
 
 You are told when the background command exits. Read its report (the records are in `<dir>/.subgoal/<run-id>/`:
-`report.md`, `run.json`, `notes.md`, one `NN/` per step; its `continue` lines give the command that reopens each chat, the worker's, the judge's or the planner's, to ask it why), then act on its exit code:
+`report.md`, `run.json`, `notes.md`, one `NN/` per step; its `continue` lines give the command that reopens each chat, the worker's, the judge's or the planner's: use one afterwards to ask that chat a follow-up question, such as why it chose something or what a finding meant), then act on its exit code:
 
 | Exit | Stop reason | Next |
 |---|---|---|

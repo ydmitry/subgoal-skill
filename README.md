@@ -40,9 +40,12 @@ Every step is a new session with no memory. What carries over is on disk: the fi
 folder, the worker's own `notes.md`, the last check output or judge verdict, and the names of the skills
 earlier steps invoked (the next step is told to invoke them again; a fresh session knows no skill).
 With `--same-session` a step after the first continues the worker's own chat instead and is sent only what the
-check or the judge said; if that chat cannot be continued, the step runs in a fresh session as above. The report
+check or the judge said; if that chat cannot be continued, the step runs in a fresh session as above. It is off by
+default: in my test on 20 HTML pages (the check, then an Opus judge, 2 steps) the same chat made 16 correct at $1.89
+a page against 18 at $1.48 with fresh sessions, a difference under my bar of 4, so nothing shows it helping. The report
 ends with one `continue` line for each chat of the run (the worker's, the judge's, the planner's): the command
-that reopens it in the folder, so you can ask it why it did what it did.
+that reopens it in the folder, so afterwards you can ask it a follow-up question: why it did what it did, or what
+a finding meant.
 
 ## Quick start
 
