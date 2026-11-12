@@ -1,4 +1,4 @@
-"""The one concrete provider: Claude Code in headless mode (claude -p), a new session per call."""
+"""The first provider: Claude Code in headless mode (claude -p), a new session per call unless one is continued."""
 import json
 import os
 import shlex
@@ -19,18 +19,17 @@ READS, TRACE_CAP = ("Read", "Grep", "Glob"), 8_000
 
 class ClaudeCode:
     """Every call runs the same command, so the permissions are fixed here, once."""
+    CONTINUE = "claude --resume {}"
 
     def __init__(self, model=None, allow=(), executable="claude", edit=True):
-        # -p                       headless, and a new session: no --continue or --resume
+        # -p                       headless, and a new session; run(resume=ID) adds --resume ID
         # stream-json --verbose    one JSON event per line (claude needs --verbose for it): the tool
         #                          calls, then a result event like the one object `json` prints
         # acceptEdits              file edits and simple file commands, inside the folder only
         # dontAsk (edit=False)     deny everything the allow list does not name
         # --permission-prompts     nobody is there to answer a prompt, so it is denied
-        self.edit = edit
-        mode = "acceptEdits" if edit else "dontAsk"
-        self.argv = [executable, "-p", "--output-format", "stream-json", "--verbose",
-                     "--permission-mode", mode, "--permission-prompts", "none"]
+        self.edit, self.argv = edit, [executable, "-p", "--output-format", "stream-json", "--verbose",
+                                      "--permission-mode", "acceptEdits" if edit else "dontAsk", "--permission-prompts", "none"]
         if not edit:
             # --tools                only these exist in this session: no Edit, Write or NotebookEdit
             # --strict-mcp-config    no MCP tools, which could write outside the folder
@@ -46,10 +45,11 @@ class ClaudeCode:
         only = ", no edit tools: it may run commands" if not self.edit else ""
         return f"{shlex.join(self.argv)}  (prompt on stdin{model}{only})"
 
-    def run(self, prompt, workdir, timeout_s):
+    def run(self, prompt, workdir, timeout_s, resume=None):
         os.environ.setdefault("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1")   # a slow command fails; none holds the session
         try:
-            code, out, err, timed_out = run_process(self.argv, workdir, timeout_s, stdin=prompt)
+            argv = self.argv[:2] + ["--resume", resume] * bool(resume) + self.argv[2:]     # right after -p; --allowedTools stays last
+            code, out, err, timed_out = run_process(argv, workdir, timeout_s, stdin=prompt)
         except FileNotFoundError:
             raise ProviderError(f"{self.argv[0]} not found: is Claude Code on PATH?") from None
         if timed_out:

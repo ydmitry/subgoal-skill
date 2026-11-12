@@ -3,8 +3,7 @@ FakeProviders. No model calls.
 
     stop reason              tests
     goal_met                 J1 (judge says met), J2 (not met, then met), J8 and J8b (a check, then the judge)
-    stuck                    J8d (the check failed the same way after a re-plan; the judge was never asked)
-    out_of_iterations        J3 (no verdict is not met)
+    out_of_iterations        J3 (no verdict is not met), J8d (the check never passed; the judge was never asked)
     out_of_time              J7 (no judge call once the worker used the time)
     out_of_tokens            J7 (no judge call once the worker used the tokens)
     provider_failed          J4 (the judge failed), J17 (the unchecked worker failed)
@@ -200,18 +199,14 @@ class JudgeLoopTest(unittest.TestCase):
 
     def test_J8c_with_a_judge_a_check_that_already_passes_guards_and_no_pass_is_a_repeated_failure(self):
         run = self.go([say()] * 3, [judges(False, "not yet")] * 3, check="true", limits=Limits(max_iterations=3), plan=True)
-        self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=3, judge=3)      # every call a verdict: no plan, no re-plan
-        self.assertEqual(run.replans, 0)
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=3, judge=3)      # every call a verdict: no plan
         self.assertIn("LAST CHECK (after step 0, exit code 0", self.worker.prompts[0])
         self.assertNotIn("the same failure", self.printed)
         self.assertIn("last verdict after step 3: not met", self.printed)
 
-    def test_J8d_the_same_failed_check_twice_re_plans_and_the_judge_gives_no_verdict(self):
-        run = self.go([say()] * 3, [say("PARTS: app.py")], check="grep -q done app.py",
-                      limits=Limits(max_iterations=3), plan=True)
-        self.ended(run, R.STUCK, 1, worker=3, judge=1)                  # the judge's tool made the re-plan, nothing more
-        self.assertTrue(self.judge.prompts[0].startswith("You plan the work of a loop of workers"))
-        self.assertEqual((run.replans, run.judge_calls), (1, 0))
+    def test_J8d_the_same_failed_check_twice_brings_no_plan_and_no_verdict(self):
+        run = self.go([say()] * 3, [], check="grep -q done app.py", limits=Limits(max_iterations=3), plan=True)
+        self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=3, judge=0)      # with a check there is no planner, and no stuck stop
         self.assertIn("no verdict yet", self.printed)
 
     def test_J9_prompts(self):
@@ -316,11 +311,10 @@ class JudgeLoopTest(unittest.TestCase):
         self.ended(run, R.OUT_OF_TIME, 1, worker=0, judge=1)
         self.assertIn("cost      $0.30", self.printed)
 
-    def test_J16b_a_judge_loop_never_re_plans(self):
+    def test_J16b_a_judge_loop_plans_once_before_step_1(self):
         run = self.go([say()] * 3, [say("PARTS: app.py"), *[judges(False, "app.py never says done")] * 3],
                       limits=Limits(max_iterations=3), plan=True)
         self.ended(run, R.OUT_OF_ITERATIONS, 1, worker=3, judge=4)       # one plan before step 1, then a verdict per step
-        self.assertEqual(run.replans, 0)
 
     def test_J17_no_check_and_no_judge_is_one_unchecked_step(self):
         self.worker, self.planner = FakeProvider([edit("app.py", "done\n", tokens=100)]), FakeProvider([say("PARTS: app.py", tokens=70)])

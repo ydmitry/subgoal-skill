@@ -33,14 +33,16 @@ flowchart LR
     C -- met --> M([goal met, exit 0])
     C -- not met --> B{budget left?}
     B -- yes --> W
-    B -- "yes, but the same failure twice" --> P["read-only re-plan"] --> W
-    C -- "not met, the same way, right after a re-plan" --> X([stuck, exit 1])
     B -- no --> S([stop, with a named reason])
 ```
 
 Every step is a new session with no memory. What carries over is on disk: the files in the
 folder, the worker's own `notes.md`, the last check output or judge verdict, and the names of the skills
 earlier steps invoked (the next step is told to invoke them again; a fresh session knows no skill).
+With `--same-session` a step after the first continues the worker's own chat instead and is sent only what the
+check or the judge said; if that chat cannot be continued, the step runs in a fresh session as above. The report
+ends with one `continue` line for each chat of the run (the worker's, the judge's, the planner's): the command
+that reopens it in the folder, so you can ask it why it did what it did.
 
 ## Quick start
 
@@ -123,28 +125,15 @@ Which to use (my evaluations behind each choice are in the bullets below):
   already passes then cannot tell done from not done, so the run ends at once as `check_already_passes`
   (exit 2), and the dry run warns about it. Make it fail first, for example with the failing test. (With
   `--judge` too, a check that already passes does not end the run: see below.)
-- **The re-plan.** When the check fails the same way after two steps in a row (the same exit code and the same
-  last 2,000 characters of output, with timings such as `0.02s`, `12 ms` or `duration_ms: 1.1`, clock times such as
-  `12:03:44,843`, dates and addresses such as `0x7f3a` taken out first), the workers are stuck, and another try from the same notes rarely helps. So before the
-  next step a read-only session of the judge model (`--judge-model`, else `--model`) re-plans: it gets the plan
-  prompt below plus the check, its output, the workers' notes and the last plan, if any. The steps after it get
-  that plan (`NN/plan.md` in the records, next to `NN/plan-prompt.md`). A step right after the pre-check never
-  counts as a repeat, there is no re-plan after the last step or past a limit, a re-plan that uses up the tokens or
-  the time ends the run before the next step, and a failed re-plan call keeps the last plan. `--no-plan` turns it
-  off. If the step that got the new plan fails the same way again, the plan did not help and the run ends as
-  `stuck` (exit 1) instead of spending the rest of the budget; a failed re-plan call made no new plan, so it
-  does not count, and the next time two steps in a row fail the same way it asks again. A second plan needs the
-  failure to change first, so with the default 4 worker calls there is at most one; the report counts them. Any number with a time unit counts as a timing, and any clock
-  time or date is taken out, so two failures that differ only in one (`took 350ms`, then `took 300ms`) count as
-  the same: the price is a re-plan, or a `stuck` stop, that was not needed. When a run ends with the check failing the way it did
-  after an earlier step, by the same rule, the report's check line says so: `exit 2, the same failure since the
-  pre-check` (or `since step 2`). Since the pre-check, it means no step changed what the check tests: the check
-  or the environment is the problem, not the goal (a test file that cannot even be collected, say), and
-  `notes.md` says what the worker verified instead. The report quotes the start and the end of the worker's
-  last words, where what it did not do or could not verify usually is. In my tests the re-plan has fired only on
-  a check built to stay red (a test file that cannot be collected): its plans named the blocker, and no outcome
-  could change there. It is untested on a fixable task that gets stuck. On 43 fixable runs it never fired, as each
-  passed at step 1, and with `--max-iterations 2` it cannot fire.
+- **The same failure.** When a run ends with the check failing the way it did after an earlier step (the same exit
+  code and the same last 2,000 characters of output, with timings, clock times, dates and addresses such as `0x7f3a`
+  taken out first), the report's check line says so: `exit 2, the same failure since the pre-check` (or `since
+  step 2`). Since the pre-check, it means no step changed what the check tests: the check or the environment is the
+  problem, not the goal (a test file that cannot even be collected, say), and `notes.md` says what the worker
+  verified instead. The report quotes the start and the end of the worker's last words, where what it did not do
+  or could not verify usually is. Earlier versions re-planned in a read-only session after the same failure twice
+  and stopped as `stuck` if that did not help. In my tests it fired only on a check built to stay red and changed
+  no outcome, at about three times the cost of those runs, so it was removed.
 - **No `--check`** (the default) runs a read-only plan and **one** worker step, then ends as
   `unchecked` (exit 0): nothing verified the result, so run the tests and read the diff yourself. The worker is
   told that nothing checks it and to keep testing its own change until it finds no more problems. Why no loop:
@@ -196,9 +185,8 @@ Which to use (my evaluations behind each choice are in the bullets below):
   judge for the rest. A failing check costs no judge call. The next step sees whichever came last: the failing
   check's output, or, once the check passed, the judge's review. A check that already passes before step 1 does not
   end the run, since the judge still tells done from not done; it guards against regressions instead. Two passing
-  checks in a row are no repeated failure, so they bring no re-plan. Everything else is as with `--check` alone:
-  the worker may run only the check (add `--allow` rules for more), and there is no plan before step 1, only the
-  re-plan when the check fails the same way twice. A command check stays the one finish line a model cannot talk
+  checks in a row are no repeated failure. Everything else is as with `--check` alone:
+  the worker may run only the check (add `--allow` rules for more), and there is no plan before step 1. A command check stays the one finish line a model cannot talk
   past: no verdict can carry a failing check.
   In my tests it beat the judge alone, before the change below. On 10 tasks where Haiku explains real material (code, a pull request, a
   dataset, an incident) to a named reader as one HTML page, with the illustrate skill's page checks as the check
@@ -241,8 +229,7 @@ Which to use (my evaluations behind each choice are in the bullets below):
   cases workers tend to skip (modifier keys, empty or repeated input, a reset from a state with progress,
   real random values), and one way to verify each part. Only the worker gets it; the judge goes by the goal
   and the files. It names no steps and no order. A failed planning call only means no plan; `--no-plan` skips it.
-  It costs one extra read-only session per run. With `--check` there is no plan before step 1, only the re-plan
-  above, at one read-only session each.
+  It costs one extra read-only session per run. With `--check` there is no plan.
 - **A goal that names a skill** ("use the tiny skill to create hello.txt"), with `--judge`, is
   judged on how the work was done, not only on the result. After each step the loop writes the worker's tool calls
   to `NN/trace.md` in the records, one line per call, in order (`Skill tiny`, `Bash ls`,
@@ -261,8 +248,7 @@ Which to use (my evaluations behind each choice are in the bullets below):
   check itself was refused; the worker's reply or notes say what was blocked.
 - **`--protect PATH`** names files the worker and the judge must not touch, such as the tests.
   If the worker changes one, the run stops before anything is checked; if a command the judge
-  runs changes one, the run stops and its verdict does not count. If a command the re-planner ran changes one,
-  the run stops before the next step. (A file the check itself leaves there, such as an ApprovalTests
+  runs changes one, the run stops and its verdict does not count. (A file the check itself leaves there, such as an ApprovalTests
   `.received` file, is seen only after the next worker step, as before.)
 
 The worker's own "I'm done" is printed in the report, but never trusted.
@@ -280,7 +266,7 @@ planner and the judge have no edit tools and may run shell commands in the folde
 
 - **It runs a coding agent unattended, as you.** The worker edits files in `--dir` and runs
   commands there: with a check, that command and simple file commands (any command with
-  opencode), and a re-plan may run any command; with no check, any command, and the planner and the judge run
+  opencode); with no check, any command, and the planner and the judge run
   commands too. They run as you,
   unsandboxed, in the folder, so in effect they can run any code you can. Work on a clean git
   tree or a branch you can reset.
@@ -357,9 +343,8 @@ Every run ends with exactly one named stop reason and an exit code:
 | `out_of_iterations` | All N worker calls were made (default 4). | 1 |
 | `out_of_time` | The wall-clock limit was reached (default 30 minutes). | 1 |
 | `out_of_tokens` | The `--max-tokens` limit was reached. | 1 |
-| `stuck` | The step that got a re-plan failed the check the same way again: the new plan did not help, so more steps from the same notes would not either. | 1 |
 | `provider_failed` | The agent tool was missing, failed, or returned unreadable output. | 3 |
-| `protected_file_changed` | The worker changed a `--protect` path (nothing is checked), or a command the judge ran did (its verdict does not count), or a command the re-planner ran did (seen right after it). | 3 |
+| `protected_file_changed` | The worker changed a `--protect` path (nothing is checked), or a command the judge ran did (its verdict does not count). | 3 |
 | `interrupted` | You pressed Ctrl+C, or the loop got SIGTERM (`kill`, a supervisor's timeout); the running agent or check is stopped too. | 130 |
 | (bad arguments) | Usage error. No run folder is created. | 2 |
 

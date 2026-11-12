@@ -19,10 +19,11 @@ class ProviderError(Exception):
 
 class Provider(Protocol):
     """The constructor also takes `edit=True`. With False, no session has a tool that edits files, though it
-    may run shell commands, and describe() says so (the judge and the planner). Reply.trace may be None."""
+    may run shell commands, and describe() says so (the judge and the planner). Reply.trace may be None. CONTINUE,
+    if the class has it, is the command a person types in the folder to go on with a session: "tool --flag {}"."""
 
     def describe(self) -> str:
         """One line: which tool, model and permissions every call uses (run.json and the report)."""
 
-    def run(self, prompt: str, workdir: Path, timeout_s: float) -> Reply:
-        """Start a NEW session in workdir, give it prompt, wait at most timeout_s, return its Reply, or raise ProviderError."""
+    def run(self, prompt: str, workdir: Path, timeout_s: float, resume: str | None = None) -> Reply:
+        """A NEW session in workdir, or `resume` (a Reply.session) continued: prompt in, at most timeout_s, its Reply or ProviderError."""

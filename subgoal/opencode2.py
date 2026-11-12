@@ -33,6 +33,7 @@ JUDGE_RULES = [rule("*", "*", "deny"),
 
 class OpenCode2:
     """Every call runs the same command with the same config, so the permissions are fixed here, once."""
+    CONTINUE = "opencode --session {}"      # run(resume=ID) adds --session ID
 
     def __init__(self, model=None, allow=(), executable=None, edit=True):
         # run --standalone         a private server that lives as long as this call. The shared
@@ -61,12 +62,12 @@ class OpenCode2:
         only = ", no edit tools: it may run commands" if not self.edit else ""
         return f"{shlex.join(self.argv)}  (run in DIR, prompt on stdin{model}{only})"
 
-    def run(self, prompt, workdir, timeout_s):
+    def run(self, prompt, workdir, timeout_s, resume=None):
         if not shutil.which(self.executable):           # `env` would start, then not find it
             raise ProviderError(f"{self.executable} not found: is opencode 2 on PATH?")
         if self.version is None:                        # before any prompt is sent, once
             self.version = check_version(self.executable, workdir)
-        code, out, err, timed_out = run_process(self.argv, workdir, timeout_s, stdin=prompt)
+        code, out, err, timed_out = run_process([*self.argv, *["--session", resume] * bool(resume)], workdir, timeout_s, stdin=prompt)
         if timed_out:
             raise ProviderError(f"no reply within {timeout_s:.0f}s; the call was stopped")
         return parse(code, out, err, workdir)

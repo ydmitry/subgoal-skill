@@ -92,6 +92,15 @@ class OpenCodeTest(unittest.TestCase):
         self.assertNotIn("no edit tools", provider.describe())
         self.assertIn("--dir DIR  (prompt on stdin)", provider.describe())
 
+    def test_O1c_a_session_is_continued_only_when_asked(self):
+        provider = OpenCode(executable=self.fake([{"stdout": OK}, {"stdout": OK}]))
+        provider.run("first", self.dir, 60)
+        provider.run("the findings", self.dir, 60, resume="ses_x")
+        first, second = self.calls()
+        self.assertEqual(first["argv"], ["run", "--format", "json", "--dir", str(self.dir)])
+        self.assertEqual(second["argv"], ["run", "--format", "json", "--session", "ses_x", "--dir", str(self.dir)])
+        self.assertEqual(OpenCode.CONTINUE.format("ses_x"), "opencode --session ses_x")
+
     def test_O1b_judge_argv_and_rules(self):
         provider = OpenCode(allow=["Edit", "Bash(rm -rf *)"], executable=self.fake([{"stdout": JUDGE}]),
                             edit=False)

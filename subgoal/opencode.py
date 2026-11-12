@@ -21,14 +21,14 @@ JUDGE_RULES = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "
 
 class OpenCode:
     """Every call runs the same command with the same config, so the permissions are fixed here, once."""
+    CONTINUE = "opencode --session {}"
 
     def __init__(self, model=None, allow=(), executable="opencode", edit=True):
-        # run --format json        a new session, one JSON event per line: no --continue or --session
+        # run --format json        a new session, one JSON event per line; run(resume=ID) adds --session ID
         # OPENCODE_CONFIG_CONTENT  merged over your own config: one agent with the rules above, made
         #                          the default, so no session starts as another agent (a missing
         #                          default agent is an error, not a fallback)
-        # allow                    Claude Code rules, unused: the CLI refuses --allow for opencode, and
-        #                          the worker may already run any command in the folder, the check too
+        # allow                    Claude Code rules, unused: the worker may already run any command in the folder
         # --pure (edit=False)     no plugins, whose code would run unasked in the judge's session
         self.edit, self.executable = edit, executable
         config = {"default_agent": AGENT, "agent": {AGENT: {
@@ -45,12 +45,12 @@ class OpenCode:
         only = ", no edit tools: it may run commands" if not self.edit else ""
         return f"{shlex.join(self.argv)} --dir DIR  (prompt on stdin{model}{only})"
 
-    def run(self, prompt, workdir, timeout_s):
+    def run(self, prompt, workdir, timeout_s, resume=None):
         if not shutil.which(self.executable):           # `env` would start, then not find it
             raise ProviderError(f"{self.executable} not found: is opencode on PATH?")
-        # --dir: opencode takes its folder from $PWD, which a child's cwd does not change
-        code, out, err, timed_out = run_process([*self.argv, "--dir", str(workdir)], workdir,
-                                                timeout_s, stdin=prompt)
+        # --dir: opencode takes its folder from $PWD, which a child's cwd does not change. --session: go on with that one
+        code, out, err, timed_out = run_process([*self.argv, *["--session", resume] * bool(resume), "--dir", str(workdir)],
+                                                workdir, timeout_s, stdin=prompt)
         if timed_out:
             raise ProviderError(f"no reply within {timeout_s:.0f}s; the call was stopped")
         if code and "Unrecognized flag: --dir" in err:

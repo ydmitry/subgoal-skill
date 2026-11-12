@@ -10,7 +10,7 @@ Read in this order:
 | File | What is in it |
 |---|---|
 | [`subgoal/provider.py`](subgoal/provider.py) | The whole contract between the loop and an agent, about 30 lines. |
-| [`subgoal/loop.py`](subgoal/loop.py) | The loop itself: `run_loop()`, the prompt template, the limits, the stop reasons, the plan and the re-plan, the report. |
+| [`subgoal/loop.py`](subgoal/loop.py) | The loop itself: `run_loop()`, the prompt template, the limits, the stop reasons, the plan, the same-chat follow-up, the report. |
 | [`subgoal/judge.py`](subgoal/judge.py) | The judge's prompt and the strict parse of its verdict line. |
 | [`subgoal/claude_code.py`](subgoal/claude_code.py) | The `claude -p` command line, its judge variant (no edit tools), and how its JSON events become a `Reply` with a trace of the tool calls. |
 | [`subgoal/opencode.py`](subgoal/opencode.py) | The same for `opencode run` (opencode 1): permissions as one config, JSON events as a `Reply`. |
@@ -83,12 +83,10 @@ Record one real output once and keep it in `tests/fixtures`.
 
 ## An exercise
 
-The loop re-plans when the check fails the same way after two worker steps in a row, and ends as
-`stuck` when the step after a re-plan fails that way again (`_steps()` in `loop.py`). A step 1
-that leaves the check exactly as the pre-check found it is not counted yet: the rule waits for
-step 2 (`prev.step > 0`). Count it, so a check that no step can move re-plans after step 1 and
-stops after step 2, and find the test that tells you what this costs a run whose step 1 only
-read the code.
+With `--same-session` a step after the first continues the worker's own chat (`_work()` in
+`loop.py`), however little that chat moved the check. Change it so that a step whose check failed
+the same way as the one before (`same_failure()`) starts a fresh session instead, and write the
+test that tells the two cases apart.
 
 ## Proposing a change
 

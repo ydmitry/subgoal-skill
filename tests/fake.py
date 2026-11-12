@@ -13,20 +13,22 @@ from subgoal.provider import Reply
 class FakeProvider:
     def __init__(self, steps):
         self.steps = list(steps)    # each step: a function(workdir) -> Reply, or one that raises
-        self.prompts, self.timeouts = [], []
+        self.prompts, self.timeouts, self.resumes = [], [], []
+    CONTINUE = "fake --continue {}"
 
     def describe(self):
         return "fake provider (scripted steps, no agent)"
 
-    def run(self, prompt, workdir, timeout_s):
+    def run(self, prompt, workdir, timeout_s, resume=None):
         self.prompts.append(prompt)
+        self.resumes.append(resume)
         self.timeouts.append(timeout_s)
         return self.steps.pop(0)(Path(workdir))
 
 
-def say(text="I worked on it.", tokens=None, cost=None):
+def say(text="I worked on it.", tokens=None, cost=None, session=None):
     """A step that changes nothing and only talks."""
-    return lambda workdir: Reply(text, tokens, cost)
+    return lambda workdir: Reply(text, tokens, cost, session)
 
 
 def judges(met, reasons="Reasons.", tokens=None):
@@ -34,11 +36,11 @@ def judges(met, reasons="Reasons.", tokens=None):
     return say(f"{reasons}\nVERDICT: {'met' if met else 'not met'}", tokens)
 
 
-def edit(path, content, text="I edited a file.", tokens=None):
+def edit(path, content, text="I edited a file.", tokens=None, session=None):
     """A step that writes one file (relative to the workdir), then replies."""
     def step(workdir):
         (workdir / path).write_text(content)
-        return Reply(text, tokens)
+        return Reply(text, tokens, session=session)
     return step
 
 

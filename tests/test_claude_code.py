@@ -58,6 +58,21 @@ class ClaudeCodeTest(unittest.TestCase):
         for unsafe in ("dangerously-skip-permissions", "bypassPermissions"):     # safety regression
             self.assertNotIn(unsafe, " ".join(argv) + provider.describe())
 
+    def test_C1d_a_session_is_continued_only_when_asked(self):
+        seen = []
+
+        def fake_run_process(cmd, cwd, timeout_s, stdin=None):
+            seen.append(cmd)
+            return 0, OK, "", False
+        provider = ClaudeCode(allow=["Bash(make test)"])
+        with mock.patch.object(claude_code, "run_process", fake_run_process):
+            provider.run("first", Path("."), 60)
+            provider.run("the findings", Path("."), 60, resume="abc-123")
+        self.assertNotIn("--resume", seen[0])
+        self.assertEqual(seen[1][:4], ["claude", "-p", "--resume", "abc-123"])
+        self.assertEqual(seen[1][4:], seen[0][2:])                          # the same rights as every other call
+        self.assertEqual(ClaudeCode.CONTINUE.format("abc-123"), "claude --resume abc-123")
+
     def test_C1c_no_background_tasks(self):
         """A command past its 120 s Bash timeout must fail, not be moved to the background: a background task holds the
         session open, and its notification starts one more turn whose reply replaces the worker's own (cycle c4, docs)."""

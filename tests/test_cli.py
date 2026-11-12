@@ -44,8 +44,11 @@ class CliTest(unittest.TestCase):
         self.assertIn(ClaudeCode(allow=["Bash(exit 1)"]).describe(), out)
         self.assertIn("GOAL\nSay hi.", out)
         self.assertIn("pre-check: exit 1\n", out)
-        self.assertIn("plan: a read-only session, only to re-plan before step 3 or later, after the same failure twice\n"
-                      f"planner: {ClaudeCode(edit=False).describe()}\n", out)          # shown before the user says yes
+        self.assertIn("plan: none (a run with a check has no planner)", out)
+        self.assertNotIn("the worker's own chat is continued", out)
+        out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--same-session", "--dry-run")[1]
+        self.assertIn(f"plan: a read-only session before step 1\nplanner: {ClaudeCode(edit=False).describe()}\n", out)   # shown before the yes
+        self.assertIn("later steps: the worker's own chat is continued (--same-session)", out)
         self.assertEqual(list(self.dir.iterdir()), [])
         out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--check", "exit 1", "--no-plan", "--dry-run")[1]
         self.assertIn("plan: none (--no-plan)", out)
