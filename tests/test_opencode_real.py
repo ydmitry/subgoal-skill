@@ -10,13 +10,15 @@ import json
 import os
 import unittest
 
+import fake  # noqa: F401  (throwaway config and records homes)
 import opencode_mock
 
 BINARY = os.environ.get("SUBGOAL_TEST_OPENCODE")
-# The worker reaches out of the folder (denied), then reads app.txt and rewrites it.
+# The worker reaches out of the folder (denied), then reads app.txt, rewrites it, and writes in the records.
 WORKER = [("write", {"filePath": "{outside}/escaped.txt", "content": "out\n"}),
           ("read", {"filePath": "app.txt"}),
           ("write", {"filePath": "app.txt", "content": "done\n"}),
+          ("write", {"filePath": "{records}/probe.md", "content": "notes\n"}),     # the records: the one place outside
           "I made app.txt say done."]
 # The judge tries each edit tool (none is offered), then runs a check of its own, reads, and
 # looks at git, which must all work.
@@ -25,6 +27,7 @@ JUDGE = [("write", {"filePath": "app.txt", "content": "judged\n"}),
          ("apply_patch", {"patchText": "*** Begin Patch\n*** Add File: judge.txt\n+judged\n*** End Patch"}),
          ("bash", {"command": "grep -q done app.txt && echo passed", "description": "Run a check"}),
          ("read", {"filePath": "app.txt"}),
+         ("read", {"filePath": "{records}/judge-probe.md"}),                     # a trace in the records
          ("bash", {"command": "git status --short", "description": "See what changed"}),
          "app.txt says done.\nVERDICT: met"]
 
@@ -46,19 +49,23 @@ class RealOpenCodeTest(opencode_mock.RealOpenCodeCase):
         self.assertIn("GOAL MET after step 1: the check exited 0", out)
         self.assertEqual((self.project / "app.txt").read_text(), "done\n")
         self.assertEqual(list(self.outside.iterdir()), [])
-        (escaped, read, wrote), calls = self.tool_results(judge=False)
+        (escaped, read, wrote, noted), calls = self.tool_results(judge=False)
         self.assertIn("prevents you from using this specific tool call", escaped)
         self.assertIn("1: todo", read)
         self.assertIn("Wrote file successfully", wrote)
+        self.assertIn("Wrote file successfully", noted)
+        self.assertEqual((self.records / "probe.md").read_text(), "notes\n")
         self.assertTrue({"write", "edit", "bash"} <= {t["function"]["name"] for t in calls[-1]["tools"]})
-        step = next(self.project.glob(".subgoal/*/01"))         # what the parser read from the events
+        step = next(self.records.glob("*/01"))         # what the parser read from the events
         call = json.loads((step / "call.json").read_text())
-        self.assertEqual((call["tokens"], call["cost_usd"]), (4 * 110, None))
+        self.assertEqual((call["tokens"], call["cost_usd"]), (5 * 110, None))
         self.assertTrue(call["session"].startswith("ses_"))
         self.assertEqual((step / "reply.md").read_text(), "I made app.txt say done.\n")
 
     def test_R2_the_judge_has_no_edit_tools_but_runs_commands(self):
-        code, out = self.subgoal()                               # no --check: a judge decides
+        self.records.mkdir(parents=True)
+        (self.records / "judge-probe.md").write_text("Bash ls\n")
+        code, out = self.subgoal("--judge", "--no-plan")         # no --check: a judge decides
         self.assertEqual(code, 0, out)
         self.assertIn("GOAL MET after step 1: a judge said met", out)
         self.assertEqual((self.project / "app.txt").read_text(), "done\n")    # the worker's edit, no more
@@ -70,8 +77,9 @@ class RealOpenCodeTest(opencode_mock.RealOpenCodeCase):
             self.assertIn("unavailable tool", text)
         self.assertIn("passed", said[3])                        # a command of its own runs
         self.assertIn("1: done", said[4])                       # reading works
-        self.assertNotIn("prevents you", said[5])               # and so does git status
-        step = next(self.project.glob(".subgoal/*/01"))
+        self.assertIn("1: Bash ls", said[5])                    # in the records too
+        self.assertNotIn("prevents you", said[6])               # and so does git status
+        step = next(self.records.glob("*/01"))
         self.assertTrue((step / "judge.md").read_text().endswith("VERDICT: met\n"))
 
 

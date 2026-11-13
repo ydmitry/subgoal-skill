@@ -5,6 +5,7 @@ import sys
 import unittest
 from pathlib import Path
 
+import fake  # noqa: F401  (throwaway config and records homes)
 from subgoal.loop import StopReason
 
 ROOT = Path(__file__).resolve().parent.parent

@@ -2,6 +2,7 @@
 the judge) says met or a budget ends the run. Read this file first. Nothing in it knows which agent sits behind a provider."""
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -63,7 +64,7 @@ You plan the work of a loop of workers on the folder {workdir}. You do not do th
 GOAL
 {goal}
 
-Read the real files, but not .subgoal/ (the loop's own records); you may run commands that only read or exercise the work.
+Read the real files; you may run commands that only read or exercise the work.
 Plan in under 80 lines, fewer for a small goal. Three parts:
 PARTS: every program, page, feature, control, rule and flow the goal covers, as found in the files.
 SUSPECTED DEFECTS: what looks wrong or untested in each part, with file and line, and the cases workers
@@ -126,7 +127,7 @@ class Run:
     protect: list
     provider: str            # provider.describe(): the tool, model and permissions used
     limits: Limits
-    folder: Path             # DIR/.subgoal/<run-id>/
+    folder: Path             # records_home(DIR)/<run-id>/
     status: str = "running"
     stop_reason: StopReason | None = None
     error: str | None = None
@@ -184,13 +185,18 @@ def safe_workdir(path):
     return workdir
 
 
+def records_home(workdir):
+    """Where a folder's runs are kept, outside it: $XDG_DATA_HOME (~/.local/share) /subgoal/<its path, with - for />/"""
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share", "subgoal", str(workdir).replace("/", "-"))
+
+
 def run_loop(goal, check, workdir, provider: Provider, limits=Limits(), protect=(),
              clock=time.monotonic, judge: Provider | None = None, plan: Provider | None = None, same_session=False):
     """Run the loop to its end and return the Run (progress to stderr, the report to stdout). The finish line is a
     `check` command, a `judge` (a provider built with edit=False), or the check and then the judge; with neither, one step
     runs, unchecked. `plan`, such a provider too, plans before step 1 when there is no check. `same_session`: see _work()."""
     workdir = safe_workdir(workdir)
-    folder = workdir / ".subgoal" / time.strftime("%Y%m%d-%H%M%S", time.gmtime())   # run id: UTC start
+    folder = records_home(workdir) / time.strftime("%Y%m%d-%H%M%S", time.gmtime())   # run id: UTC start
     while folder.exists():                                          # a second run in the same second
         folder = folder.with_name(folder.name + "b")
     folder.mkdir(parents=True)
@@ -228,7 +234,7 @@ def _steps(run, provider, judge, guarded, time_left, planner=None, same_session=
         step, notes = run.folder / f"{i:02d}", run.folder / "notes.md"
         step.mkdir()
         skills = sorted({s[6:].strip() for t in traces.values() for s in t.splitlines() if s.startswith("Skill ")})
-        prompt = build_prompt(run.goal, run.check, run.protect, notes.relative_to(run.dir),
+        prompt = build_prompt(run.goal, run.check, run.protect, notes,
                               notes.read_text() if notes.exists() else "",
                               newest(run), skills, plan, judge is not None)
         run.steps, began = i, time.monotonic()
@@ -284,7 +290,7 @@ def _steps(run, provider, judge, guarded, time_left, planner=None, same_session=
 def _work(run, provider, step, prompt, session, time_left):
     """One worker call (NN/prompt.md). With `session`, that chat goes on with only what the finish line said; if it cannot, a fresh one."""
     if session:
-        short = FOLLOW_UP.format(seen=last_said(last := newest(run)), fix=FIX_CAUSE * isinstance(last, Verdict), notes_path=step.parent.relative_to(run.dir) / "notes.md")
+        short = FOLLOW_UP.format(seen=last_said(last := newest(run)), fix=FIX_CAUSE * isinstance(last, Verdict), notes_path=step.parent / "notes.md")
         (step / "prompt.md").write_text(short)
         try:
             return _chat(run, "worker", provider, provider.run(short, run.dir, time_left(), resume=session))
@@ -369,7 +375,7 @@ def fingerprint(workdir, paths):
 def _digest(root):
     digest = hashlib.sha256()
     for f in sorted(root.rglob("*")) if root.is_dir() else [root]:
-        if not f.is_dir() and not {".subgoal", "__pycache__"} & set(f.relative_to(root).parts):
+        if not f.is_dir() and "__pycache__" not in f.relative_to(root).parts:
             digest.update(str(f).encode() + (f.read_bytes() if f.exists() else b"(missing)"))
     return digest.hexdigest()
 

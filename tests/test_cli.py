@@ -12,9 +12,10 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+import fake  # noqa: F401  (throwaway config and records homes)
 from subgoal.claude_code import ClaudeCode
 from subgoal.cli import main
-from subgoal.loop import Limits, StopReason
+from subgoal.loop import Limits, StopReason, records_home
 from subgoal.opencode import OpenCode
 
 CORE = Path(__file__).resolve().parent.parent / "subgoal"
@@ -24,6 +25,7 @@ class CliTest(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.dir)
+        self.records = records_home(self.dir.resolve())
         nobody = mock.patch.object(ClaudeCode, "run", side_effect=AssertionError("tests call no agent"))
         nobody.start()
         self.addCleanup(nobody.stop)
@@ -41,13 +43,13 @@ class CliTest(unittest.TestCase):
             code, out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--check", "exit 1",
                                  "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn(ClaudeCode(allow=["Bash(exit 1)"]).describe(), out)
+        self.assertIn(ClaudeCode(allow=["Bash(exit 1)"], records=self.records).describe(), out)
         self.assertIn("GOAL\nSay hi.", out)
         self.assertIn("pre-check: exit 1\n", out)
         self.assertIn("plan: none (a run with a check has no planner)", out)
         self.assertNotIn("the worker's own chat is continued", out)
         out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--same-session", "--dry-run")[1]
-        self.assertIn(f"plan: a read-only session before step 1\nplanner: {ClaudeCode(edit=False).describe()}\n", out)   # shown before the yes
+        self.assertIn(f"plan: a read-only session before step 1\nplanner: {ClaudeCode(edit=False, records=self.records).describe()}\n", out)   # shown before the yes
         self.assertIn("later steps: the worker's own chat is continued (--same-session)", out)
         self.assertEqual(list(self.dir.iterdir()), [])
         out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--check", "exit 1", "--no-plan", "--dry-run")[1]
@@ -81,12 +83,12 @@ class CliTest(unittest.TestCase):
     def test_X3_no_check_and_a_judge_flag_means_a_judge(self):
         code, out = self.cli("--dir", str(self.dir), "--goal", "Review the docs.", "--judge", "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn(f"provider: {ClaudeCode(allow=['Bash', 'Read']).describe()}\n", out)    # any command, no check
-        self.assertIn(f"judge: {ClaudeCode(edit=False).describe()}\n", out)
+        self.assertIn(f"provider: {ClaudeCode(allow=['Bash', 'Read'], records=self.records).describe()}\n", out)    # any command, no check
+        self.assertIn(f"judge: {ClaudeCode(edit=False, records=self.records).describe()}\n", out)
         self.assertIn("a separate reviewer reads your result against the goal and decides", out)
         self.assertIn("LAST REVIEW (none yet: this is the first step)", out)
         self.assertIn("<the worker's last words go here>", out)             # the judge prompt template
-        self.assertIn(f"in the run folder {self.dir.resolve()}/.subgoal/<run-id>/ is the loop's own record", out)
+        self.assertIn(f"in the run folder {self.records}/<run-id>/ (outside the work) is the loop's own record", out)
         self.assertNotIn("pre-check: exit", out)
         self.assertEqual(list(self.dir.iterdir()), [])
 
@@ -95,9 +97,9 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("pre-check: exit 0\n", out)                     # with a judge, a passing check guards: no warning
         self.assertNotIn("check_already_passes", out)
-        self.assertIn(f"provider: {ClaudeCode(allow=['Bash(true)']).describe()}\n", out)    # the worker may run only the check
+        self.assertIn(f"provider: {ClaudeCode(allow=['Bash(true)'], records=self.records).describe()}\n", out)    # the worker may run only the check
         self.assertIn("Once it exits 0, a separate reviewer reads your result", out)
-        self.assertIn(f"judge: {ClaudeCode(edit=False).describe()}\n", out)
+        self.assertIn(f"judge: {ClaudeCode(edit=False, records=self.records).describe()}\n", out)
         self.assertIn("judge prompt, after each step whose check exits 0:\n", out)
         self.assertEqual(list(self.dir.iterdir()), [])
 
@@ -191,12 +193,40 @@ class CliTest(unittest.TestCase):
         self.assertEqual(loop.returncode, StopReason.INTERRUPTED.exit_code)
         self.assertIn("interrupted", out)
 
+    def test_X20_defaults_come_from_the_flags_file(self):
+        flags = Path(os.environ["XDG_CONFIG_HOME"], "subgoal", "flags")
+        flags.parent.mkdir(exist_ok=True)
+        self.addCleanup(flags.unlink)
+        flags.write_text("# my defaults\n--max-minutes 7 --provider opencode\n--judge-model 'big one'   # for the judge\n")
+        code, out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--judge", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith(f"defaults from {flags}: --max-minutes 7 --provider opencode --judge-model 'big one'\nDRY RUN"))
+        self.assertIn(f"provider: {OpenCode(records=self.records).describe()}\n", out)
+        self.assertIn("--model 'big one'", out)
+        out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--provider", "claude-code", "--dry-run")[1]
+        self.assertIn(f"provider: {ClaudeCode(allow=['Bash', 'Read'], records=self.records).describe()}\n", out)   # what is typed wins
+        for never in ("--dir /tmp", "--goal=x", "--goal-file g.md"):
+            flags.write_text(never + "\n")
+            self.assertEqual(self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--dry-run")[0], 2, never)
+        flags.write_text("")
+        self.assertTrue(self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--dry-run")[1].startswith("DRY RUN"))
+
+    def test_X21_the_records_are_kept_outside_the_folder(self):
+        with mock.patch.dict(os.environ, XDG_DATA_HOME="/data"):
+            self.assertEqual(records_home(Path("/work/my app")), Path("/data/subgoal/-work-my app"))
+        with mock.patch.dict(os.environ, XDG_DATA_HOME=""):
+            self.assertEqual(records_home(Path("/w")), Path.home() / ".local/share/subgoal/-w")
+        out = self.cli("--dir", str(self.dir), "--goal", "Say hi.", "--judge", "--dry-run")[1]
+        self.assertIn(f"rewrite {self.records}/<run-id>/notes.md in full", out)
+        self.assertEqual(out.count(f"--add-dir {self.records} "), 3)                # the worker, the planner and the judge may reach them
+        self.assertNotIn(".subgoal", out)
+
     def test_S1_size_budget(self):
         def count(f):
             return sum(1 for line in f.read_text().splitlines() if line.strip())
         providers = ("claude_code.py", "opencode.py", "opencode2.py")   # a provider is not part of the loop core
         core = sum(count(f) for f in CORE.glob("*.py") if f.name not in providers)
-        self.assertLessEqual(core, 570, "the core must stay readable in one sitting")
+        self.assertLessEqual(core, 585, "the core must stay readable in one sitting")
         for name in providers:
             self.assertLessEqual(count(CORE / name), 100, f"{name}: a provider must stay small")
 

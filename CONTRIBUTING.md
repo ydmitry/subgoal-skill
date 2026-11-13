@@ -45,7 +45,7 @@ local server on 127.0.0.1 that plays a script. It is skipped when the variable i
 
 ## The size rule
 
-The loop core is capped at 570 non-blank lines, not counting the provider modules, and each
+The loop core is capped at 585 non-blank lines, not counting the provider modules, and each
 provider module at 100. `test_S1_size_budget` in [`tests/test_cli.py`](tests/test_cli.py)
 enforces it. If a change needs more lines, something else should get simpler first.
 

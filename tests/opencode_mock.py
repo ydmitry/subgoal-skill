@@ -65,7 +65,7 @@ class Server(ThreadingHTTPServer):
         step = script[min(done, len(script) - 1)]
         if isinstance(step, str):
             return {"role": "assistant", "content": step}, "stop"
-        arguments = json.dumps(step[1]).replace("{outside}", str(self.outside))
+        arguments = json.dumps(step[1]).replace("{outside}", str(self.outside)).replace("{records}", str(self.records))
         return {"role": "assistant", "content": None, "tool_calls": [{
             "index": 0, "id": f"call_{done}", "type": "function",
             "function": {"name": step[0], "arguments": arguments}}]}, "tool_calls"
@@ -108,6 +108,8 @@ class RealOpenCodeCase(unittest.TestCase):
         self.addCleanup(self.model.server_close)
         self.addCleanup(self.model.shutdown)
         self.env = throwaway_home(root / "home", self.binary, self.provider, self.config(self.model.server_port))
+        # where subgoal keeps this folder's records under that home: outside the project, and the one place outside it may reach
+        self.records = self.model.records = Path(self.env["XDG_DATA_HOME"], "subgoal", str(self.project.resolve()).replace("/", "-"))
         # opencode was reported to signal all of the user's processes when a run ends (upstream
         # issue 45938). This bystander is ours, in its own session, and must outlive every run.
         self.bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(900)"],

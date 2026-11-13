@@ -35,7 +35,7 @@ first prompt, and get a yes. Then run it without `--dry-run`, as a background co
 
 ## 3. Read the result
 
-You are told when the background command exits. Read its report (the records are in `<dir>/.subgoal/<run-id>/`:
+You are told when the background command exits. Read its report (its `records` line names the run's folder, kept outside `<dir>` under `~/.local/share/subgoal/`:
 `report.md`, `run.json`, `notes.md`, one `NN/` per step; its `continue` lines give the command that reopens each chat, the worker's, the judge's or the planner's: use one afterwards to ask that chat a follow-up question, such as why it chose something or what a finding meant), then act on its exit code:
 
 | Exit | Stop reason | Next |

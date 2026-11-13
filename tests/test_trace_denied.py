@@ -2,6 +2,7 @@
 import json
 import unittest
 
+import fake  # noqa: F401  (throwaway config and records homes)
 from subgoal.claude_code import parse, tool_trace
 
 

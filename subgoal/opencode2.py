@@ -35,7 +35,7 @@ class OpenCode2:
     """Every call runs the same command with the same config, so the permissions are fixed here, once."""
     CONTINUE = "opencode --session {}"      # run(resume=ID) adds --session ID
 
-    def __init__(self, model=None, allow=(), executable=None, edit=True):
+    def __init__(self, model=None, allow=(), executable=None, edit=True, records=None):
         # run --standalone         a private server that lives as long as this call. The shared
         #                          background service is never used: it would not see this config
         # env -u PWD               opencode takes its folder from $PWD before its cwd, which is DIR
@@ -49,8 +49,9 @@ class OpenCode2:
         # executable               default: opencode2 (the installer's name) if on PATH, else opencode
         executable = executable or ("opencode2" if shutil.which("opencode2") else "opencode")
         self.edit, self.executable, self.version = edit, executable, None
+        outside = [rule("external_directory", f"{records}/*", "allow")] * bool(records)   # file tools reach the records, no more
         config = {"agents": {AGENT: {"mode": "primary",
-                                     "permissions": WORKER_RULES if edit else JUDGE_RULES}}}
+                                     "permissions": [*(WORKER_RULES if edit else JUDGE_RULES), *outside]}}}
         self.argv = ["env", "-u", "PWD", *([] if edit else ["OPENCODE_DISABLE_PROJECT_CONFIG=1"]),
                      "OPENCODE_CONFIG_CONTENT=" + json.dumps(config, separators=(",", ":")),
                      executable, "run", "--standalone", "--format", "json", "--agent", AGENT]

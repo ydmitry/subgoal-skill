@@ -80,7 +80,7 @@ subgoal: GOAL MET after step 1: the check exited 0
     Ran 4 tests in 0.000s
 
     OK
-  records   /private/tmp/fizz/.subgoal/20261021-150625/
+  records   /Users/you/.local/share/subgoal/-private-tmp-fizz/20261021-150625/
 ```
 
 The token figure counts everything the agent read, cached input included, and cached input is
@@ -97,7 +97,22 @@ prompt, with no agent called.
 
 Everything the run did is in that `records` folder: `run.json`, the worker's `notes.md`, and
 for each step the exact prompt, the reply, the check output or the judge's reply, and `trace.md`,
-the worker's tool calls.
+the worker's tool calls. The records are kept outside your project, so a run adds nothing to it but the work:
+`~/.local/share/subgoal/<the folder's path, with - for />/<run-id>/` (under `$XDG_DATA_HOME` if you set it).
+
+Flags you always pass can go in `~/.config/subgoal/flags` (under `$XDG_CONFIG_HOME` if you set it), written as you
+would type them, with `#` for a comment:
+
+```
+# my defaults
+--provider opencode
+--judge-model claude-opus-5-5
+--max-minutes 60
+```
+
+The file is read first and the command line after it, so a flag you type wins. An on/off flag in the file, such as
+`--judge`, is on for every run, and `--protect` and `--allow` add to what you type. `--dir` and the goal are refused
+there. `--dry-run` prints the defaults it used.
 
 ## Who says "done": a check, nobody, a judge, or a check and then a judge
 
@@ -265,7 +280,9 @@ and run the check command you pass and your `--allow` rules (with no check, any 
 Anything else is denied rather than asked, so a run cannot hang waiting for an answer. Background tasks are off too
 (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`): a command that outlives Claude Code's 2-minute Bash timeout fails, instead of
 holding the session open until a notification turn replaces the worker's reply. The
-planner and the judge have no edit tools and may run shell commands in the folder.
+planner and the judge have no edit tools and may run shell commands in the folder. Outside the folder, each of
+them is let into one place more: the folder's records (`--add-dir` for Claude Code, a permission rule for opencode),
+where the worker writes its notes and the judge reads the traces.
 
 - **It runs a coding agent unattended, as you.** The worker edits files in `--dir` and runs
   commands there: with a check, that command and simple file commands (any command with

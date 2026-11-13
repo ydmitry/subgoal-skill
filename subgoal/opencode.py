@@ -23,7 +23,7 @@ class OpenCode:
     """Every call runs the same command with the same config, so the permissions are fixed here, once."""
     CONTINUE = "opencode --session {}"
 
-    def __init__(self, model=None, allow=(), executable="opencode", edit=True):
+    def __init__(self, model=None, allow=(), executable="opencode", edit=True, records=None):
         # run --format json        a new session, one JSON event per line; run(resume=ID) adds --session ID
         # OPENCODE_CONFIG_CONTENT  merged over your own config: one agent with the rules above, made
         #                          the default, so no session starts as another agent (a missing
@@ -31,8 +31,8 @@ class OpenCode:
         # allow                    Claude Code rules, unused: the worker may already run any command in the folder
         # --pure (edit=False)     no plugins, whose code would run unasked in the judge's session
         self.edit, self.executable = edit, executable
-        config = {"default_agent": AGENT, "agent": {AGENT: {
-            "mode": "primary", "permission": WORKER_RULES if edit else JUDGE_RULES}}}
+        outside = {"external_directory": {"*": "deny", f"{records}/*": "allow"}} if records else {}   # the records only
+        config = {"default_agent": AGENT, "agent": {AGENT: {"mode": "primary", "permission": {**(WORKER_RULES if edit else JUDGE_RULES), **outside}}}}
         self.argv = ["env", "OPENCODE_CONFIG_CONTENT=" + json.dumps(config, separators=(",", ":")),
                      executable, "run", "--format", "json"]
         if not edit:

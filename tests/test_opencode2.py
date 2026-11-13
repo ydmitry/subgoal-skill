@@ -25,6 +25,7 @@ from unittest import mock
 
 from fake import fake_opencode, gone, opencode_match
 from subgoal.cli import main
+from subgoal.loop import records_home
 from subgoal.opencode2 import AGENT, JUDGE_RULES, WORKER_RULES, OpenCode2
 from subgoal.opencode import parse
 from test_opencode import step, tool
@@ -216,7 +217,12 @@ class OpenCode2Test(unittest.TestCase):
         self.assertEqual(judge["env"]["OPENCODE_DISABLE_PROJECT_CONFIG"], "1")
         self.assertNotIn("OPENCODE_DISABLE_PROJECT_CONFIG", worker["env"])
         for call, rules in ((worker, WORKER_RULES), (judge, JUDGE_RULES)):
-            self.assertEqual(json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"])["agents"][AGENT]["permissions"], rules)
+            got = json.loads(call["env"]["OPENCODE_CONFIG_CONTENT"])["agents"][AGENT]["permissions"]
+            self.assertEqual(got[:-1], rules)
+            records = records_home(self.dir.resolve())                # file tools reach the folder's records, and nothing else outside
+            self.assertEqual(decide("external_directory", f"{records}/20261113-090000/notes.md", got), "allow")
+            self.assertEqual(decide("external_directory", "/tmp/elsewhere/x", got), "deny")
+            self.assertEqual(decide("shell", f"cat {records}/x", got), "deny")
 
     def test_P8_cli_surface(self):
         def cli(*argv):
@@ -229,8 +235,8 @@ class OpenCode2Test(unittest.TestCase):
         here = ["--dir", str(self.dir), "--goal", "g", "--provider", "opencode2"]
         code, out = cli(*here, "--judge", "--dry-run", "--model", "mock/scripted")
         self.assertEqual(code, 0)
-        self.assertIn(f"provider: {OpenCode2(model='mock/scripted').describe()}\n", out)
-        self.assertIn(f"judge: {OpenCode2(model='mock/scripted', edit=False).describe()}\n", out)
+        self.assertIn(f"provider: {OpenCode2(model='mock/scripted', records=records_home(self.dir.resolve())).describe()}\n", out)
+        self.assertIn(f"judge: {OpenCode2(model='mock/scripted', edit=False, records=records_home(self.dir.resolve())).describe()}\n", out)
         self.assertEqual(cli(*here, "--check", "true", "--allow", "Edit")[0], 2)    # Claude Code rules
         self.assertEqual(list(self.dir.iterdir()), [self.dir / "app.txt"])
         shown = subprocess.run([sys.executable, "-m", "subgoal", "--help"], cwd=ROOT, capture_output=True, text=True)

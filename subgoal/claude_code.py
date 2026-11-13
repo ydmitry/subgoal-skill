@@ -21,14 +21,14 @@ class ClaudeCode:
     """Every call runs the same command, so the permissions are fixed here, once."""
     CONTINUE = "claude --resume {}"
 
-    def __init__(self, model=None, allow=(), executable="claude", edit=True):
+    def __init__(self, model=None, allow=(), executable="claude", edit=True, records=None):
         # -p                       headless, and a new session; run(resume=ID) adds --resume ID
         # stream-json --verbose    one JSON event per line (claude needs --verbose for it): the tool
         #                          calls, then a result event like the one object `json` prints
-        # acceptEdits              file edits and simple file commands, inside the folder only
+        # acceptEdits, --add-dir   file edits and simple file commands, in the folder and in its records (kept outside it) only
         # dontAsk (edit=False)     deny everything the allow list does not name
         # --permission-prompts     nobody is there to answer a prompt, so it is denied
-        self.edit, self.argv = edit, [executable, "-p", "--output-format", "stream-json", "--verbose",
+        self.edit, self.argv = edit, [executable, "-p", "--output-format", "stream-json", "--verbose", *["--add-dir", str(records)] * bool(records),
                                       "--permission-mode", "acceptEdits" if edit else "dontAsk", "--permission-prompts", "none"]
         if not edit:
             # --tools                only these exist in this session: no Edit, Write or NotebookEdit

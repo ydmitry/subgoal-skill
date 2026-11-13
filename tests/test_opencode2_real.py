@@ -11,6 +11,7 @@ import json
 import os
 import unittest
 
+import fake  # noqa: F401  (throwaway config and records homes)
 import opencode_mock
 
 BINARY = os.environ.get("SUBGOAL_TEST_OPENCODE2")
@@ -23,6 +24,7 @@ WORKER = [("shell", {"command": "ls"}),
           ("read", {"path": ".env"}),
           ("read", {"path": "app.txt"}),
           ("write", {"path": "app.txt", "content": "done\n"}),
+          ("write", {"path": "{records}/probe.md", "content": "notes\n"}),         # the records: the one place outside
           ("shell", {"command": "grep -q done app.txt && echo found"}),
           "I made app.txt say done."]
 # The judge tries each edit tool (none is offered) and a command naming a path outside (denied,
@@ -66,7 +68,7 @@ class RealOpenCode2Test(opencode_mock.RealOpenCodeCase):
         self.assertIn("GOAL MET after step 1: the check exited 0", out)
         self.assertEqual((self.project / "app.txt").read_text(), "done\n")
         self.assertEqual(list(self.outside.iterdir()), [])
-        (listed, hosts, touched, escaped, secret, read, wrote, checked), calls = self.tool_results(judge=False)
+        (listed, hosts, touched, escaped, secret, read, wrote, noted, checked), calls = self.tool_results(judge=False)
         self.assertIn("app.txt", listed)                         # a command in the folder runs
         for text in (hosts, touched):                            # a command naming a path outside does not
             self.assertIn("Permission denied: shell", text)
@@ -74,18 +76,20 @@ class RealOpenCode2Test(opencode_mock.RealOpenCodeCase):
         self.assertIn("cannot ask the user for permission, so the request was rejected", secret)
         self.assertIn("1: todo", read)
         self.assertIn("Wrote file successfully", wrote)
+        self.assertIn("Wrote file successfully", noted)
+        self.assertEqual((self.records / "probe.md").read_text(), "notes\n")
         self.assertIn("found", checked)                          # the worker can run a check
         self.assertTrue({"write", "edit", "shell"} <= {t["function"]["name"] for t in calls[-1]["tools"]})
         self.assertEqual(self.loaded.read_text(), "on\n")    # project plugins do run in a worker session
-        step = next(self.project.glob(".subgoal/*/01"))         # what the parser read from the events
+        step = next(self.records.glob("*/01"))         # what the parser read from the events
         call = json.loads((step / "call.json").read_text())
-        self.assertIn(call["tokens"], (8 * 110, 9 * 110))       # opencode 2.1.4 may drop the last step's
+        self.assertIn(call["tokens"], (9 * 110, 10 * 110))       # opencode 2.1.4 may drop the last step's
         self.assertIsNone(call["cost_usd"])
         self.assertTrue(call["session"].startswith("ses_"))
         self.assertEqual((step / "reply.md").read_text(), "I made app.txt say done.\n")
 
     def test_R2_the_judge_has_no_edit_tools_but_runs_commands(self):
-        code, out = self.subgoal()                               # no --check: a judge decides
+        code, out = self.subgoal("--judge", "--no-plan")         # no --check: a judge decides
         self.assertEqual(code, 0, out)
         self.assertIn("GOAL MET after step 1: a judge said met", out)
         self.assertEqual((self.project / "app.txt").read_text(), "done\n")    # the worker's edit, no more
@@ -100,7 +104,7 @@ class RealOpenCode2Test(opencode_mock.RealOpenCodeCase):
         self.assertIn("passed", said[4])                        # a command of its own runs
         self.assertIn("1: done", said[5])                       # reading works
         self.assertNotIn("Permission denied", said[6])          # and so does git status
-        step = next(self.project.glob(".subgoal/*/01"))
+        step = next(self.records.glob("*/01"))
         self.assertTrue((step / "judge.md").read_text().endswith("VERDICT: met\n"))
 
 

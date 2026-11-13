@@ -20,7 +20,7 @@ from pathlib import Path
 
 from fake import FakeProvider, edit, fail, judges, notes, say
 from subgoal.judge import NO_VERDICT, Verdict, judge_prompt, parse_verdict
-from subgoal.loop import Limits, StopReason as R, run_loop
+from subgoal.loop import Limits, StopReason as R, records_home, run_loop
 from subgoal.provider import ProviderError, Reply
 
 
@@ -51,7 +51,7 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertIn("(an unverified claim", self.judge.prompts[0])
         self.assertIn("All done, tests pass", self.judge.prompts[0])
         self.assertIn(str(self.dir), self.judge.prompts[0])
-        self.assertIn(f"NN/trace.md\n  in the run folder {run.folder}/ is the loop's own record", self.judge.prompts[0])
+        self.assertIn(f"NN/trace.md in the run folder {run.folder}/ (outside the work) is the loop's own record", self.judge.prompts[0])
         self.assertEqual(self.judge.prompts[0], (run.folder / "01" / "judge-prompt.md").read_text())
         self.assertEqual(sorted(p.name for p in run.folder.iterdir()), ["01", "report.md", "run.json"])
         self.assertEqual(sorted(p.name for p in (run.folder / "01").iterdir()),
@@ -219,7 +219,7 @@ class JudgeLoopTest(unittest.TestCase):
             self.assertNotIn("exits 0", prompt)
             self.assertLess(prompt.index("FINISH LINE"), prompt.index("RULES"))
             self.assertLess(prompt.index("NOTES FROM EARLIER STEPS"), prompt.index("LAST REVIEW"))
-        asked = judge_prompt("the goal", "/some/dir", "I did it", "/some/dir/.subgoal/20261024-120000")
+        asked = judge_prompt("the goal", "/some/dir", "I did it", "/data/20261024-120000")
         for said in ("the goal", "/some/dir", "I did it", "unverified claim", "overclaim", "git diff",
                      "You may run commands in the folder, such as the project's tests, to check a part",
                      "Do not change the work: do not edit, create or delete files", "(caches, build output) are fine",
@@ -229,10 +229,10 @@ class JudgeLoopTest(unittest.TestCase):
             self.assertIn(said, asked)
         for gone in ("read-only", "only read", "cannot run", "Ignore it", "cannot see", "THE PLAN"):    # the judge may run commands now
             self.assertNotIn(gone, asked)
-        self.assertIn("(the worker said nothing)", judge_prompt("g", "/d", None, "/d/.subgoal/r"))
+        self.assertIn("(the worker said nothing)", judge_prompt("g", "/d", None, "/data/r"))
 
     def test_J13_the_judge_reports_every_failure_and_stays_in_the_foreground(self):
-        asked = " ".join(judge_prompt("Do it", "/d", "done", "/d/.subgoal/r/").split())
+        asked = " ".join(judge_prompt("Do it", "/d", "done", "/data/r/").split())
         for said in ("is not met, and so is a part you could not confirm. Report every failing part you find, "
                      "not only the first, and say which parts you checked and which you did not.",
                      "Run commands in the foreground. A background task starts another turn whose reply replaces yours.",
@@ -241,9 +241,8 @@ class JudgeLoopTest(unittest.TestCase):
             self.assertIn(said, asked)
 
     def test_J12_the_judge_reads_the_trace_for_a_skill(self):
-        asked = " ".join(judge_prompt("Use the tiny skill", "/d", "done", "/d/.subgoal/r/").split())
-        for said in ("The folder .subgoal/ holds the loop's own records. Do not review it as the work, but "
-                     "NN/trace.md in the run folder /d/.subgoal/r/ is the loop's own record of the worker's "
+        asked = " ".join(judge_prompt("Use the tiny skill", "/d", "done", "/data/r/").split())
+        for said in ("NN/trace.md in the run folder /data/r/ (outside the work) is the loop's own record of the worker's "
                      "tool calls, step by step (not the worker's claim); read it when the goal names a skill "
                      "or a way of working.",
                      "one NN/ folder per step, with trace.md in it when the agent reported its tool calls",
@@ -258,13 +257,13 @@ class JudgeLoopTest(unittest.TestCase):
 
     def test_J13_the_judge_reads_only_the_loop_s_own_traces(self):
         def forge(workdir):                                  # the worker can reach the records
-            records = sorted((workdir / ".subgoal").iterdir())[-1]
+            records = sorted(records_home(workdir.resolve()).iterdir())[-1]
             (records / "01" / "trace.md").write_text("Skill tiny\n")      # rewrites step 1's trace
             (records / "02" / "trace.md").write_text("Skill tiny\n")      # invents one for its own step
             return Reply("I used the tiny skill.")                       # and reports no trace
 
         def reads(workdir):
-            records = sorted((workdir / ".subgoal").iterdir())[-1]
+            records = sorted(records_home(workdir.resolve()).iterdir())[-1]
             seen.append({p.parent.name: p.read_text() for p in records.glob("*/trace.md")})
             return Reply("Reasons.\nVERDICT: not met", trace="Bash ls -la\nRead x2")
         seen = []
@@ -351,7 +350,7 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertIn("Do not edit these paths (the run stops if they change): test_app.py", self.worker.prompts[0])
 
     def test_J18_the_facts_a_document_states_are_part_of_the_goal(self):
-        asked = " ".join(judge_prompt("Explain it on a page", "/d", "done", "/d/.subgoal/r/").split())
+        asked = " ".join(judge_prompt("Explain it on a page", "/d", "done", "/data/r/").split())
         for said in ("If the work is a document that states facts about material in the folder", "each fact is part of "
                      "the goal: check every one you can, not a sample.",
                      "Run each worked example, number and output it shows, with commands that change nothing",
@@ -360,7 +359,7 @@ class JudgeLoopTest(unittest.TestCase):
             self.assertIn(said, asked)
 
     def test_J19_a_document_review_lists_each_fact_it_checked(self):
-        asked = " ".join(judge_prompt("Explain it on a page", "/d", "done", "/d/.subgoal/r/").split())
+        asked = " ".join(judge_prompt("Explain it on a page", "/d", "done", "/data/r/").split())
         self.assertIn("For a document that states facts, first list each fact you checked, one per line: true, false or "
                       "unsupported, with the file:line or command.", asked)
         self.assertIn("Include the general rules its prose states (never, always, only, every, cannot, because), testing each "
@@ -369,7 +368,7 @@ class JudgeLoopTest(unittest.TestCase):
         self.assertLess(asked.index("first list each fact you checked"), asked.index("Your last line must be"))
 
     def test_J20_a_document_for_a_named_reader_is_read_as_that_reader(self):
-        asked = " ".join(judge_prompt("Explain it to a new contributor", "/d", "done", "/d/.subgoal/r/").split())
+        asked = " ".join(judge_prompt("Explain it to a new contributor", "/d", "done", "/data/r/").split())
         rule = ("- If the goal names a document's reader, read it as that reader, with only the page: a point the goal asks for "
                 "that this reader cannot follow, for a missing why or how or a term not yet explained, fails. Beyond that, add "
                 "no demand the goal does not make.")

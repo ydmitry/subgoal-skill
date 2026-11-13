@@ -1,13 +1,19 @@
 """Fakes that record what they got. FakeProvider plays scripted steps instead of calling an
 agent; fake_opencode writes an opencode binary that plays scripted output."""
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
+from subgoal.loop import records_home
 from subgoal.provider import Reply
+
+# Tests never read the person's own flags file or write into their records: both homes are throwaway.
+os.environ["XDG_CONFIG_HOME"], os.environ["XDG_DATA_HOME"] = tempfile.mkdtemp(), tempfile.mkdtemp()
 
 
 class FakeProvider:
@@ -47,7 +53,7 @@ def edit(path, content, text="I edited a file.", tokens=None, session=None):
 def notes(content, text="I left notes."):
     """A step that rewrites notes.md in the current run folder, as the prompt asks."""
     def step(workdir):
-        run_folder = sorted((workdir / ".subgoal").iterdir())[-1]
+        run_folder = sorted(records_home(workdir.resolve()).iterdir())[-1]
         (run_folder / "notes.md").write_text(content)
         return Reply(text)
     return step

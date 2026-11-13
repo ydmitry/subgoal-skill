@@ -22,6 +22,7 @@ from pathlib import Path
 
 from fake import fake_opencode, gone, opencode_match
 from subgoal.cli import main
+from subgoal.loop import records_home
 from subgoal.opencode import AGENT, JUDGE_RULES, WORKER_RULES, OpenCode, parse
 from subgoal.provider import ProviderError
 
@@ -218,10 +219,11 @@ class OpenCodeTest(unittest.TestCase):
         worker, judge = self.calls()
         self.assertTrue(judge["stdin"].startswith("You are a reviewer"))
         self.assertIn("--pure", judge["argv"])
-        self.assertEqual(json.loads(judge["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], JUDGE_RULES)
-        self.assertEqual(json.loads(worker["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], WORKER_RULES)
+        outside = {"external_directory": {"*": "deny", f"{records_home(self.dir.resolve())}/*": "allow"}}     # the records only
+        self.assertEqual(json.loads(judge["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], {**JUDGE_RULES, **outside})
+        self.assertEqual(json.loads(worker["env"]["OPENCODE_CONFIG_CONTENT"])["agent"][AGENT]["permission"], {**WORKER_RULES, **outside})
         self.assertEqual((self.dir / "app.txt").read_text(), "done\n")
-        (trace,) = self.dir.glob(".subgoal/*/01/trace.md")                  # the judge can see what the worker did
+        (trace,) = records_home(self.dir.resolve()).glob("*/01/trace.md")                  # the judge can see what the worker did
         self.assertEqual(trace.read_text(), parse(0, OK, "").trace + "\n")
 
     def test_O9_cli_surface(self):
@@ -235,8 +237,8 @@ class OpenCodeTest(unittest.TestCase):
         here = ["--dir", str(self.dir), "--goal", "g", "--provider", "opencode"]
         code, out = cli(*here, "--judge", "--dry-run", "--model", "mock/scripted")
         self.assertEqual(code, 0)
-        self.assertIn(f"provider: {OpenCode(model='mock/scripted').describe()}\n", out)
-        self.assertIn(f"judge: {OpenCode(model='mock/scripted', edit=False).describe()}\n", out)
+        self.assertIn(f"provider: {OpenCode(model='mock/scripted', records=records_home(self.dir.resolve())).describe()}\n", out)
+        self.assertIn(f"judge: {OpenCode(model='mock/scripted', edit=False, records=records_home(self.dir.resolve())).describe()}\n", out)
         self.assertEqual(cli(*here, "--check", "true", "--allow", "Edit")[0], 2)    # Claude Code rules
         self.assertEqual(cli(*here, "--check", "true", "--allow", "Edit", "--provider", "claude-code",
                              "--dry-run")[0], 0)
