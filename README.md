@@ -126,9 +126,12 @@ Which to use (my evaluations behind each choice are in the bullets below):
   page made with the illustrate skill, its `gates.py`). In my tests on HTML pages with a Haiku worker, the command
   below made 18 of 20 pages correct (no serious error, at most one small one), against 11 with the check alone and
   7 with the check and a Sonnet judge or with no flag, in separate rounds; the Opus judge was $1.17 of its $1.48 a
-  page. With no such script, `--judge` alone with the Opus judge made 17 of 20 at $1.70. Documents other than pages
-  were not measured. `ILLUSTRATE` is the illustrate skill's folder, and `--allow Bash` lets the worker run any
-  command, as in the tests:
+  page. With no such script, `--judge` alone with the Opus judge made 17 of 20 at $1.70. On plain Markdown
+  documents about the same 10 subjects, with no script and no plan, `--judge` with the Opus judge made 9 of 20
+  correct against 2 with nothing checking the one step, at $0.99 against $0.18 a document. The judged documents
+  made about 12% fewer claims, and in 13 of the 20 runs the judge still said "not met" after its second step.
+  `ILLUSTRATE` is the illustrate skill's folder, and `--allow Bash` lets the worker run any command, as in the
+  tests:
   ```
   python3 -m subgoal --dir DIR --goal-file GOAL.md --model claude-haiku-5-5 --judge --judge-model claude-opus-5-5 \
     --check "python3 ILLUSTRATE/scripts/gates.py page.html" --allow Bash --max-iterations 2 --no-plan
